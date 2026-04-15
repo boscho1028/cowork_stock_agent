@@ -66,7 +66,7 @@ def cmd_init():
     sec = SECCollector()
     sec.fetch_initial(config.PORTFOLIO, days_back=365)
 
-    print("\n✅ 초기화 완료. python main.py --analyze 로 분석 시작하세요.")
+    print("\n[OK] 초기화 완료. python main.py --analyze 로 분석 시작하세요.")
 
 
 def cmd_update(tickers=None):
@@ -92,7 +92,7 @@ def cmd_analyze(tickers=None, header=""):
 
     에러 처리 방침:
     - 정상 종목: 분석 결과 전송
-    - 에러 종목: ⚠️ 에러 알림 포함해서 전송 (누락 없이 파악 가능)
+    - 에러 종목: [WARN] 에러 알림 포함해서 전송 (누락 없이 파악 가능)
     - 전체 에러: 헤더에 실패 현황 표시
     """
     targets  = tickers or config.PORTFOLIO
@@ -133,7 +133,7 @@ def cmd_analyze(tickers=None, header=""):
         err_names = ", ".join(r["name"] for r in err_results)
         full_header = (
             f"{header}\n" if header else ""
-        ) + f"⚠️ {ok_cnt}/{total}종목 정상 | 분석 실패: {err_names}"
+        ) + f"[WARN] {ok_cnt}/{total}종목 정상 | 분석 실패: {err_names}"
 
     # 정상 결과 전송
     all_results = ok_results[:]
@@ -141,7 +141,7 @@ def cmd_analyze(tickers=None, header=""):
     # 에러 종목도 알림으로 포함
     for r in err_results:
         err_msg = (
-            f"⚠️ [{r['ticker']}] {r['name']} 분석 실패\n"
+            f"[WARN] [{r['ticker']}] {r['name']} 분석 실패\n"
             f"오류: {r['error']}\n"
             f"➡️ 다음 실행 시 자동 재시도됩니다."
         )
@@ -153,7 +153,7 @@ def cmd_analyze(tickers=None, header=""):
     for r in ok_results:
         mark_sent(r["ticker"])
 
-    print(f"✅ 전송 완료: 정상 {ok_cnt}종목 | 에러 {err_cnt}종목")
+    print(f"[OK] 전송 완료: 정상 {ok_cnt}종목 | 에러 {err_cnt}종목")
 
 
 def cmd_dart_only(tickers=None):
@@ -162,7 +162,7 @@ def cmd_dart_only(tickers=None):
     dart     = DartCollector()
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
 
-    lines = [f"📋 T-1 특별 공시 확인\n🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    lines = [f"[DART] T-1 특별 공시 확인\n🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
     for ticker in targets:
         dart.fetch_special_disclosures(ticker, days_back=3)
         summary = dart.get_disclosure_summary(ticker, limit=5)
@@ -170,7 +170,7 @@ def cmd_dart_only(tickers=None):
         lines.append(f"─── {name}({ticker}) ───\n{summary}")
 
     notifier.send("\n\n".join(lines))
-    print("✅ 공시 확인 완료")
+    print("[OK] 공시 확인 완료")
 
 
 def cmd_weekly_report():
@@ -178,7 +178,7 @@ def cmd_weekly_report():
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
     analyzer = StockAnalyzer()
     ts       = datetime.now().strftime("%Y%m%d")
-    lines    = [f"📅 주간 전략 리포트 [{datetime.now().strftime('%Y-%m-%d')} 기준]"]
+    lines    = [f"[WEEKLY] 주간 전략 리포트 [{datetime.now().strftime('%Y-%m-%d')} 기준]"]
     results  = []
 
     for ticker in config.PORTFOLIO:
@@ -189,7 +189,7 @@ def cmd_weekly_report():
             results.append({"ticker": ticker, "analysis": text})
             lines.append(f"{'─'*30}\n{text}")
         except Exception as e:
-            lines.append(f"❌ {ticker} {name}: {e}")
+            lines.append(f"[ERROR] {ticker} {name}: {e}")
 
     # 파일 저장
     report_dir = os.path.join(os.path.dirname(__file__), "..", "output", "reports")
@@ -199,17 +199,17 @@ def cmd_weekly_report():
         f.write("\n\n".join(lines))
     print(f"  [저장] {report_path}")
 
-    notifier.send_batch(results, header="📅 주간 전략 리포트")
-    print("✅ 주간 리포트 완료")
+    notifier.send_batch(results, header="[WEEKLY] 주간 전략 리포트")
+    print("[OK] 주간 리포트 완료")
 
 
 # ── 스케줄 래퍼 ───────────────────────────────────────────────────────
 
 def run_daily():
     """주중 08:00 — 업데이트 + 전체 분석 + 채널 전송"""
-    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] 📊 일일 분석 시작")
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 일일 분석 시작")
     cmd_update()
-    cmd_analyze(header=f"📊 AI 주식 전략 | {datetime.now().strftime('%m/%d')} 08:00")
+    cmd_analyze(header=f"[REPORT] AI 주식 전략 | {datetime.now().strftime('%m/%d')} 08:00")
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────

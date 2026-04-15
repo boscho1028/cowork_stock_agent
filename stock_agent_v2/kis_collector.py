@@ -372,7 +372,7 @@ class KISCollector:
                 except Exception as e:
                     print(f"ERROR: {e}")
 
-        print("\n✅ 초기 적재 완료")
+        print("\n[OK] 초기 적재 완료")
 
     def run_daily_update(self, tickers: list):
         today = datetime.today().strftime("%Y-%m-%d")
@@ -408,7 +408,7 @@ class KISCollector:
 
             self.check_and_fix_adjustment(ticker, "D")
 
-        print("✅ 일간 업데이트 완료")
+        print("[OK] 일간 업데이트 완료")
 
     @staticmethod
     def _concat(frames: list) -> pd.DataFrame:

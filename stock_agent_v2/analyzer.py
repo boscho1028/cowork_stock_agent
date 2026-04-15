@@ -37,8 +37,8 @@ def compute_indicators(df: pd.DataFrame, ma_periods: list, cfg: dict) -> dict:
     mas = [R[f"ma{p}"] for p in ma_periods if f"ma{p}" in R]
     if len(mas) >= 2:
         R["ma_align"] = (
-            "정배열 ✅" if all(mas[i] > mas[i+1] for i in range(len(mas)-1)) else
-            "역배열 ❌" if all(mas[i] < mas[i+1] for i in range(len(mas)-1)) else
+            "정배열 [OK]" if all(mas[i] > mas[i+1] for i in range(len(mas)-1)) else
+            "역배열 [ERROR]" if all(mas[i] < mas[i+1] for i in range(len(mas)-1)) else
             "혼조"
         )
 
@@ -68,7 +68,7 @@ def compute_indicators(df: pd.DataFrame, ma_periods: list, cfg: dict) -> dict:
     overbought = cfg["rsi_overbought"]
     pr, cr     = R["rsi_prev"], R["rsi"]
     if pr >= oversold and cr < oversold:
-        R["rsi_signal"] = f"⚠️ RSI {oversold} 하향돌파! (과매도 진입)"
+        R["rsi_signal"] = f"[WARN] RSI {oversold} 하향돌파! (과매도 진입)"
     elif pr < oversold and cr >= oversold:
         R["rsi_signal"] = f"🟢 RSI {oversold} 상향돌파! (과매도 탈출)"
     elif cr < oversold:
@@ -260,9 +260,9 @@ def compute_ichimoku(df: pd.DataFrame, cfg: dict) -> dict:
         cloud_top = max(sa_val, sb_val)
         cloud_bot = min(sa_val, sb_val)
         cloud_pos = (
-            "구름 위 ✅ (강세)" if price > cloud_top else
-            "구름 아래 ❌ (약세)" if price < cloud_bot else
-            "구름 안 ⚠️ (중립)"
+            "구름 위 [OK] (강세)" if price > cloud_top else
+            "구름 아래 [ERROR] (약세)" if price < cloud_bot else
+            "구름 안 [WARN] (중립)"
         )
 
     # 지지/저항
@@ -466,18 +466,18 @@ RSI: {m.get('rsi_signal','N/A')}
 ─────────────────────────────────────────────────────────
 아래 형식으로 텔레그램 채널 메시지를 작성하세요 (이모지 포함, 900자 이내):
 
-📊 {name}({ticker}) [{market_tag}]
+[REPORT] {name}({ticker}) [{market_tag}]
 💼 {qty:,}주 | 현재 {currency}{fp(curr)}
 
 🔭 큰그림(월봉)
 · MA10: {{월봉 10선 상황 + 돌파 여부}}
 · 패턴: {{월봉 추세전환 신호}}
 
-📅 중기(주봉)
+[WEEKLY] 중기(주봉)
 · MA10: {{주봉 10선 상황 + 돌파 여부}}
 · 패턴: {{주봉 추세전환 신호}}
 
-🔍 단기(일봉)
+[SINGLE] 단기(일봉)
 · RSI: {{과매도 진입/탈출 여부}}
 · 패턴: {{일봉 추세전환 신호}}
 · MACD: {{크로스 여부}}
@@ -487,7 +487,7 @@ RSI: {m.get('rsi_signal','N/A')}
 · 지지: {{지지레벨}} | 저항: {{저항레벨}}
 · {{전환/기준선 크로스 여부}}
 
-📋 {disc_label}: {{주요 공시 또는 "특이 없음"}}
+[DART] {disc_label}: {{주요 공시 또는 "특이 없음"}}
 
 🎯 전략: 매수고려 / 관망 / 비중축소 중 하나
 📍 진입: {{가격}}  🛑 손절: {{가격 또는 조건}}

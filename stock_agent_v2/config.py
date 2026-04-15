@@ -129,18 +129,43 @@ def get_portfolio() -> list:
 
 
 def is_overseas(ticker: str) -> bool:
-    """해외 종목 여부"""
+    """
+    해외 종목 여부
+    - 포트폴리오에 있으면 exchange 컬럼으로 판단
+    - 포트폴리오에 없으면 티커 형태로 자동 판단
+      (숫자 6자리 → 국내 KRX, 영문 알파벳 → 해외)
+    - _temp_overseas 에 임시 등록된 종목도 처리
+    """
     with _portfolio_lock:
         info = _portfolio_detail.get(ticker, {})
-        return info.get("is_overseas", False)
+        if info:
+            return info.get("is_overseas", False)
+    # 포트폴리오에 없는 종목: 티커로 자동 판단
+    return not ticker.isdigit()
+
+
+def register_temp(ticker: str, name: str = "", exchange: str = None):
+    """
+    포트폴리오에 없는 종목을 임시로 등록 (분석용)
+    exchange: 'KRX' | 'NASDAQ' | 'NYSE' | None(자동판단)
+    """
+    if exchange is None:
+        exchange = "KRX" if ticker.isdigit() else "NASDAQ"
+    with _portfolio_lock:
+        _portfolio_detail[ticker] = {
+            "name":        name or ticker,
+            "qty":         0,
+            "exchange":    exchange.upper(),
+            "is_overseas": exchange.upper() not in ("KRX", "KOSPI", "KOSDAQ"),
+        }
 
 
 def get_excd(ticker: str) -> str:
-    """KIS 해외거래소 코드 반환"""
+    """KIS 해외거래소 코드 반환 (포트폴리오에 없으면 NASDAQ 기본값)"""
     with _portfolio_lock:
         info     = _portfolio_detail.get(ticker, {})
-        exchange = info.get("exchange", "KRX")
-        return EXCHANGE_TO_EXCD.get(exchange, "NAS")
+        exchange = info.get("exchange", "NASDAQ" if not ticker.isdigit() else "KRX")
+    return EXCHANGE_TO_EXCD.get(exchange.upper(), "NAS")
 
 
 # ── CSV 변경 감지 ────────────────────────────────────────────────────
