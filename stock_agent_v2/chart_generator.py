@@ -339,40 +339,6 @@ def generate_chart(
     return buf.read()
 
 
-def combine_charts_vertical(charts: dict, order=("D", "W", "M")) -> bytes:
-    """일/주/월 차트 PNG bytes를 세로로 이어붙여 단일 PNG로 반환."""
-    from PIL import Image
-
-    images = []
-    for key in order:
-        b = charts.get(key)
-        if not b:
-            continue
-        images.append(Image.open(io.BytesIO(b)).convert("RGB"))
-    if not images:
-        return b""
-
-    target_w = max(im.width for im in images)
-    resized  = []
-    for im in images:
-        if im.width != target_w:
-            ratio = target_w / im.width
-            im    = im.resize((target_w, int(im.height * ratio)), Image.LANCZOS)
-        resized.append(im)
-
-    total_h  = sum(im.height for im in resized)
-    combined = Image.new("RGB", (target_w, total_h), color=C["bg"])
-    y = 0
-    for im in resized:
-        combined.paste(im, (0, y))
-        y += im.height
-
-    buf = io.BytesIO()
-    combined.save(buf, format="PNG", optimize=True)
-    buf.seek(0)
-    return buf.read()
-
-
 def _error_image(ticker: str, msg: str) -> bytes:
     fig, ax = plt.subplots(figsize=(6, 2), facecolor=C["bg"])
     ax.set_facecolor(C["bg"])

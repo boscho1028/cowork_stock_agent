@@ -205,12 +205,21 @@ def handle_command(chat_id: int, text: str, user_name: str):
     elif cmd in ("/dart", "/공시"):
         run_script(chat_id, "run_dart.py", task_name="공시확인")
 
-    # 시그널 스캔 (/signals 만 입력 → universe 전체 / /signals TICKER → 해당 종목만)
+    # 시그널 스캔
+    #  /signals             → universe 전체
+    #  /signals portfolio   → portfolio 종목만
+    #  /signals TICKER      → 해당 종목만
     elif cmd in ("/signals", "/시그널"):
         if args:
-            tk = args[0].upper()
-            run_script(chat_id, "run_signals.py", args=[tk],
-                       task_name=f"{tk}시그널")
+            arg0  = args[0]
+            lower = arg0.lower()
+            if lower in ("portfolio", "universe"):
+                pass_arg = lower
+                task     = f"{lower}시그널"
+            else:
+                pass_arg = arg0.upper()
+                task     = f"{pass_arg}시그널"
+            run_script(chat_id, "run_signals.py", args=[pass_arg], task_name=task)
         else:
             run_script(chat_id, "run_signals.py", task_name="시그널스캔")
 
@@ -261,10 +270,11 @@ def handle_command(chat_id: int, text: str, user_name: str):
             "   예) /single NVDA\n\n"
             "[START] /dart\n"
             "   DART + SEC 공시 확인\n\n"
-            "[START] /signals [종목코드]\n"
-            "   시그널 스캔 (규칙 기반)\n"
-            "   · 인자 없음: universe 전체\n"
-            "   · 종목코드: 해당 종목만\n\n"
+            "[START] /signals [대상]\n"
+            "   시그널 스캔 (업데이트 + 규칙 기반)\n"
+            "   · 인자 없음    : universe 전체\n"
+            "   · portfolio    : 보유 종목만\n"
+            "   · 종목코드     : 해당 종목만\n\n"
             "[START] /weekly\n"
             "   주간 전략 리포트\n\n"
             "[START] /portfolio\n"

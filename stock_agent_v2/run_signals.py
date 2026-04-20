@@ -1,8 +1,9 @@
 """
 run_signals.py - 시그널 스캔 래퍼
 사용:
-  python run_signals.py            # universe 전체
-  python run_signals.py 005930     # 단일 종목만
+  python run_signals.py              # universe 전체
+  python run_signals.py portfolio    # portfolio 종목만
+  python run_signals.py 005930       # 단일 종목만
 """
 import os
 import sys
@@ -16,8 +17,9 @@ from datetime import datetime
 from main import cmd_signals
 
 if __name__ == "__main__":
-    ticker  = sys.argv[1].strip().upper() if len(sys.argv) >= 2 else None
-    tickers = [ticker] if ticker else None
+    # 대소문자 유지 (cmd_signals 내부에서 portfolio/universe 키워드 소문자 비교)
+    arg     = sys.argv[1].strip() if len(sys.argv) >= 2 else None
+    tickers = [arg] if arg else None
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] 시그널 스캔 시작"
-          + (f" ({ticker})" if ticker else ""))
+          + (f" ({arg})" if arg else ""))
     cmd_signals(tickers=tickers)

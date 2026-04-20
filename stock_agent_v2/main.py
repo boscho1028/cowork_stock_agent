@@ -9,12 +9,14 @@ main.py - KIS API 버전 실행 진입점
 
 사용법:
   python main.py --init                    # 최초 1회: DB생성 + 5년치 캔들(universe) + 공시
-  python main.py --update                  # 증분 업데이트 (universe 전체)
-  python main.py --analyze                 # portfolio 분석 + 채널 전송
-  python main.py --analyze --ticker 005930 # 단일 종목 분석
+  python main.py --update                  # 증분 업데이트 (universe 전체, 느림)
+  python main.py --analyze                 # portfolio 업데이트 + 분석 + 채널 전송 (빠름)
+  python main.py --analyze --ticker 005930 # 단일 종목 업데이트 + 분석
   python main.py --dart-only               # portfolio 공시 확인만
   python main.py --weekly                  # portfolio 주간 리포트
-  python main.py --signals                 # universe 시그널 스캔 + 요약 전송
+  python main.py --signals                 # universe 업데이트 + 시그널 스캔
+  python main.py --signals --ticker portfolio  # portfolio 업데이트 + 시그널 스캔
+  python main.py --signals --ticker 005930 # 단일 종목 업데이트 + 시그널 스캔
   python main.py                           # 스케줄 모드 (주중 08:00 → update+analyze)
 """
 
@@ -31,7 +33,7 @@ from dart_collector   import DartCollector
 from sec_collector    import SECCollector
 from analyzer         import StockAnalyzer
 from telegram_bot     import TelegramNotifier
-from chart_generator  import generate_chart, combine_charts_vertical
+from chart_generator  import generate_chart
 
 
 def _get_arg(args, key, default=None):
@@ -95,21 +97,19 @@ def cmd_update(tickers=None):
 
 
 def _make_chart(ticker: str, name: str) -> dict:
-    """일/주/월 차트를 한 장으로 합쳐 반환. {"combined": bytes}."""
-    parts = {}
+    """일/주/월 차트를 각각 생성해 반환. {"D": bytes, "W": bytes, "M": bytes}."""
+    charts = {}
     for interval, limit in [("D", 400), ("W", 260), ("M", 60)]:
         try:
             df = load_candles(ticker, interval, limit=limit)
             if not df.empty:
-                parts[interval] = generate_chart(
+                charts[interval] = generate_chart(
                     df, ticker, name, config.INDICATOR_CONFIG, interval=interval
                 )
         except Exception as e:
             lbl = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
             print(f"  [WARN] {ticker} {lbl} 차트 생성 실패: {e}")
-
-    combined = combine_charts_vertical(parts)
-    return {"combined": combined} if combined else {}
+    return charts
 
 
 def cmd_analyze(tickers=None, header=""):
@@ -203,20 +203,47 @@ def cmd_dart_only(tickers=None):
 def cmd_signals(tickers=None):
     """
     시그널 스캔 → 발동 시그널 요약 텔레그램 전송 (Claude 호출 없음)
-    tickers=None : universe 전체
-    tickers=[..]: 지정 종목만
+    스캔 전에 대상 종목을 증분 업데이트하여 신선도 보장.
+
+    tickers=None               : universe 전체
+    tickers=["portfolio"]      : portfolio 종목만
+    tickers=["universe"]       : universe 전체 (명시)
+    tickers=["005930"]         : 지정 종목만
     """
     from signals import evaluate_signals, format_report
 
-    if tickers:
-        targets = [t.strip().upper() for t in tickers]
-        header  = f"[SIGNAL] {','.join(targets)} 단일 시그널 스캔"
-    else:
+    # ── 타겟 결정 ─────────────────────────────────────────────────────
+    if tickers is None:
         targets = list(config.UNIVERSE)
-        header  = ""
+        mode_label = f"universe {len(targets)}종목"
+        header = ""
+    else:
+        first = tickers[0].strip().lower() if tickers else ""
+        if len(tickers) == 1 and first == "portfolio":
+            targets = list(config.PORTFOLIO)
+            mode_label = f"portfolio {len(targets)}종목"
+            header = f"[SIGNAL] portfolio 시그널 스캔"
+        elif len(tickers) == 1 and first == "universe":
+            targets = list(config.UNIVERSE)
+            mode_label = f"universe {len(targets)}종목"
+            header = ""
+        else:
+            targets = [t.strip().upper() for t in tickers]
+            mode_label = ",".join(targets)
+            header = f"[SIGNAL] {mode_label} 시그널 스캔"
 
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
-    print(f"[SIGNAL] {len(targets)}종목 스캔 시작" + (" (단일)" if tickers else ""))
+
+    if not targets:
+        notifier.send("[SIGNAL] 대상 종목 없음")
+        return
+
+    # ── 스캔 전 증분 업데이트 (신선도 보장) ───────────────────────────
+    print(f"[SIGNAL] {mode_label} 업데이트 + 스캔 시작")
+    try:
+        cmd_update(targets)
+    except Exception as e:
+        print(f"  [WARN] 업데이트 실패 (기존 DB로 진행): {e}")
 
     all_sigs = []
     for ticker in targets:
@@ -268,9 +295,9 @@ def cmd_weekly_report():
 # ── 스케줄 래퍼 ───────────────────────────────────────────────────────
 
 def run_daily():
-    """주중 08:00 — 업데이트 + 전체 분석 + 채널 전송"""
+    """주중 08:00 — portfolio 업데이트 + portfolio 분석 + 채널 전송"""
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 일일 분석 시작")
-    cmd_update()
+    cmd_update(list(config.PORTFOLIO))
     cmd_analyze(header=f"[REPORT] AI 주식 전략 | {datetime.now().strftime('%m/%d')} 08:00")
 
 
@@ -285,7 +312,10 @@ if __name__ == "__main__":
     if   "--init"      in args: cmd_init()
     elif "--update"    in args: cmd_update(tickers)
     elif "--analyze"   in args:
-        cmd_update(tickers)
+        # --analyze 는 portfolio 분석이 목적 → 업데이트도 portfolio 만 (빠름).
+        # --ticker 가 지정되면 해당 종목만.
+        update_targets = tickers or list(config.PORTFOLIO)
+        cmd_update(update_targets)
         cmd_analyze(tickers, header)
     elif "--dart-only" in args: cmd_dart_only(tickers)
     elif "--weekly"    in args: cmd_weekly_report()
