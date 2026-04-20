@@ -1,0 +1,15 @@
+# ── AI 클라이언트 ────────────────────────────────────────────────
+anthropic>=0.40.0          # Claude API (analyzer.py)
+google-genai>=1.0.0        # Gemini API (analyzer.py _call_gemini)
+
+# ── HTTP / 데이터 ───────────────────────────────────────────────
+requests>=2.31.0           # KIS / DART / SEC EDGAR / Telegram
+pandas>=2.0.0              # 캔들·지표·DB 조회
+numpy>=1.24.0              # 지표 계산·시그널
+
+# ── 차트 ────────────────────────────────────────────────────────
+matplotlib>=3.7.0          # chart_generator (Pillow는 matplotlib 의존성으로 자동 설치)
+
+# ── 유틸 ────────────────────────────────────────────────────────
+schedule>=1.2.0            # main.py 일일 배치 스케줄
+python-dotenv>=1.0.0       # .env 로더
