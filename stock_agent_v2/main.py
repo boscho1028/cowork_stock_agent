@@ -17,6 +17,10 @@ main.py - KIS API 버전 실행 진입점
   python main.py --signals                 # universe 업데이트 + 시그널 스캔
   python main.py --signals --ticker portfolio  # portfolio 업데이트 + 시그널 스캔
   python main.py --signals --ticker 005930 # 단일 종목 업데이트 + 시그널 스캔
+
+AI 모델 선택 (전역 기본값은 .env 의 AI_PRIMARY, 런타임 오버라이드는 --model):
+  python main.py --analyze --model claude  # Claude 우선(실패 시 Gemini 폴백)
+  python main.py --analyze --model gemini  # Gemini 우선(실패 시 Claude 폴백)
   python main.py                           # 스케줄 모드 (주중 08:00 → update+analyze)
 """
 
@@ -112,9 +116,10 @@ def _make_chart(ticker: str, name: str) -> dict:
     return charts
 
 
-def cmd_analyze(tickers=None, header=""):
+def cmd_analyze(tickers=None, header="", primary=None):
     """
     분석 실행 + 텔레그램 채널 전송
+    primary: 'claude' | 'gemini' | None(config.AI_PRIMARY 따름)
 
     에러 처리 방침:
     - 정상 종목: 분석 결과 전송
@@ -123,13 +128,15 @@ def cmd_analyze(tickers=None, header=""):
     """
     targets  = tickers or config.PORTFOLIO
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
-    analyzer = StockAnalyzer()
+    analyzer = StockAnalyzer(primary=primary)
 
     ok_results  = []   # 정상 분석 결과
     err_results = []   # 에러 결과
 
     for ticker in targets:
-        info = config.get_portfolio_detail().get(ticker, {})
+        info = (config.get_portfolio_detail().get(ticker)
+             or config.get_universe_detail().get(ticker)
+             or {})
         name = info.get("name", ticker)
         print(f"  ▶ [{ticker}] {name} 분석 중...")
         try:
@@ -262,10 +269,10 @@ def cmd_signals(tickers=None):
     print(f"[OK] 시그널 전송 완료 (발동 {len(all_sigs)}건)")
 
 
-def cmd_weekly_report():
+def cmd_weekly_report(primary=None):
     """주봉·월봉 중심 주간 리포트 + 파일 저장 + 채널 전송"""
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
-    analyzer = StockAnalyzer()
+    analyzer = StockAnalyzer(primary=primary)
     ts       = datetime.now().strftime("%Y%m%d")
     lines    = [f"[WEEKLY] 주간 전략 리포트 [{datetime.now().strftime('%Y-%m-%d')} 기준]"]
     results  = []
@@ -308,6 +315,7 @@ if __name__ == "__main__":
     ticker_arg = _get_arg(args, "--ticker")
     tickers    = [ticker_arg] if ticker_arg else None
     header     = _get_arg(args, "--header", default="")
+    model_arg  = _get_arg(args, "--model")  # claude | gemini | None(.env 값)
 
     if   "--init"      in args: cmd_init()
     elif "--update"    in args: cmd_update(tickers)
@@ -316,9 +324,9 @@ if __name__ == "__main__":
         # --ticker 가 지정되면 해당 종목만.
         update_targets = tickers or list(config.PORTFOLIO)
         cmd_update(update_targets)
-        cmd_analyze(tickers, header)
+        cmd_analyze(tickers, header, primary=model_arg)
     elif "--dart-only" in args: cmd_dart_only(tickers)
-    elif "--weekly"    in args: cmd_weekly_report()
+    elif "--weekly"    in args: cmd_weekly_report(primary=model_arg)
     elif "--signals"   in args: cmd_signals(tickers)
     else:
         # 스케줄 모드: 주중(월~금) 08:00 단 1회

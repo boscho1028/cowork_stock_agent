@@ -6,6 +6,7 @@ analyzer.py - 기술적 지표 + Claude AI 분석
   - 해외주식 대응 (통화 표시, 공시 스킵)
 """
 
+import time
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
@@ -14,6 +15,14 @@ import config
 from database import load_candles, load_latest_report
 from dart_collector import DartCollector
 from sec_collector  import SECCollector
+
+# Gemini는 선택 의존성. 미설치 시 Claude 전용 모드로 폴백.
+try:
+    from google import genai as _genai
+    from google.genai import types as _genai_types
+    _GENAI_AVAILABLE = True
+except ImportError:
+    _GENAI_AVAILABLE = False
 
 
 def _t_minus_1_business_day() -> datetime:
@@ -321,11 +330,119 @@ def _fp(v, is_overseas=False):
 
 class StockAnalyzer:
 
-    def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        self.dart   = DartCollector()
-        self.sec    = SECCollector()
-        self.cfg    = config.INDICATOR_CONFIG
+    # Claude API 529(Overloaded)·429·5xx 발생 시 재시도 간격(초)
+    _RETRY_DELAYS    = (5, 15, 45)
+    _PROVIDER_LABEL  = {"claude": "Claude", "gemini": "Gemini"}
+
+    def __init__(self, primary: str = None):
+        """
+        primary: 'claude' | 'gemini' | None(None이면 config.AI_PRIMARY 사용)
+        실패 시 반대 모델로 단일 폴백.
+        """
+        p = (primary or config.AI_PRIMARY or "claude").lower()
+        if p not in ("claude", "gemini"):
+            print(f"[WARN] 알 수 없는 primary '{p}' → claude 로 설정")
+            p = "claude"
+        self.primary = p
+
+        # Claude client (SDK 기본 재시도를 5회로)
+        self.claude_client = anthropic.Anthropic(
+            api_key=config.ANTHROPIC_API_KEY, max_retries=5,
+        )
+
+        # Gemini client (선택)
+        self.gemini_client = None
+        if _GENAI_AVAILABLE and config.GOOGLE_API_KEY:
+            try:
+                self.gemini_client = _genai.Client(api_key=config.GOOGLE_API_KEY)
+            except Exception as e:
+                print(f"[WARN] Gemini 클라이언트 생성 실패: {e}")
+        elif not _GENAI_AVAILABLE:
+            print("[INFO] google-genai 미설치 → Gemini 폴백 비활성")
+        elif not config.GOOGLE_API_KEY:
+            print("[INFO] GOOGLE_API_KEY 미설정 → Gemini 폴백 비활성")
+
+        print(f"[AI] primary = {self.primary}"
+              + ("" if self.gemini_client else " (Gemini 비활성)"))
+
+        self.dart = DartCollector()
+        self.sec  = SECCollector()
+        self.cfg  = config.INDICATOR_CONFIG
+
+    # ── Provider 호출 ────────────────────────────────────────────────
+
+    def _call_claude(self, prompt: str) -> str:
+        """Overloaded/Rate-limit/5xx 에 대해 백오프 재시도."""
+        last_err = None
+        for attempt in range(len(self._RETRY_DELAYS) + 1):
+            try:
+                resp = self.claude_client.messages.create(
+                    model=config.CLAUDE_MODEL,
+                    max_tokens=1200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return resp.content[0].text
+            except anthropic.APIStatusError as e:
+                status    = getattr(e, "status_code", None)
+                msg       = str(e).lower()
+                retryable = (status in (429, 500, 502, 503, 504, 529)
+                             or "overloaded" in msg or "rate" in msg)
+                last_err = e
+                if not retryable or attempt >= len(self._RETRY_DELAYS):
+                    raise
+                wait = self._RETRY_DELAYS[attempt]
+                print(f"  [RETRY] Claude {status} → {wait}s 후 재시도 "
+                      f"({attempt+1}/{len(self._RETRY_DELAYS)})")
+                time.sleep(wait)
+        if last_err:
+            raise last_err
+
+    def _call_gemini(self, prompt: str) -> str:
+        if not self.gemini_client:
+            raise RuntimeError("Gemini 사용 불가 — google-genai 또는 GOOGLE_API_KEY 확인")
+        # thinking_budget 을 config에서 받아 품질·비용 밸런스 조정 가능.
+        # 0(OFF) / 512(가벼움) / 1024(권장·기본) / 2048(Pro에 근접)
+        resp = self.gemini_client.models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents=prompt,
+            config=_genai_types.GenerateContentConfig(
+                max_output_tokens=4000,
+                temperature=0.7,
+                thinking_config=_genai_types.ThinkingConfig(
+                    thinking_budget=config.GEMINI_THINKING_BUDGET
+                ),
+            ),
+        )
+        text = resp.text if hasattr(resp, "text") else ""
+        if not text:
+            # 원인 진단 (finish_reason = MAX_TOKENS / SAFETY / RECITATION 등)
+            reason = None
+            try:
+                reason = getattr(resp.candidates[0], "finish_reason", None)
+            except Exception:
+                pass
+            raise RuntimeError(f"Gemini 빈 응답 (finish_reason={reason})")
+        return text.strip()
+
+    def _invoke(self, provider: str, prompt: str) -> str:
+        if provider == "claude":
+            return self._call_claude(prompt)
+        return self._call_gemini(prompt)
+
+    def _call_ai(self, prompt: str):
+        """primary → 반대 모델 순으로 호출. (text, provider) 반환."""
+        secondary = "gemini" if self.primary == "claude" else "claude"
+        try:
+            return self._invoke(self.primary, prompt), self.primary
+        except Exception as e_primary:
+            print(f"  [FALLBACK] {self.primary} 실패 → {secondary} 시도 "
+                  f"({type(e_primary).__name__}: {str(e_primary)[:120]})")
+            try:
+                return self._invoke(secondary, prompt), secondary
+            except Exception as e_secondary:
+                print(f"  [FAIL] {secondary}도 실패: "
+                      f"{type(e_secondary).__name__}: {str(e_secondary)[:120]}")
+                raise e_primary
 
     def analyze(self, ticker: str) -> str:
         cfg      = self.cfg
@@ -367,8 +484,10 @@ class StockAnalyzer:
         # 재무 (국내만)
         report = load_latest_report(ticker) if not overseas else None
 
-        # 보유 정보 (평단가 없음)
-        info = config.get_portfolio_detail().get(ticker, {})
+        # 보유 정보 (portfolio → universe 순 조회, 평단가 없음)
+        info = (config.get_portfolio_detail().get(ticker)
+             or config.get_universe_detail().get(ticker)
+             or {})
         name = info.get("name", ticker)
         qty  = info.get("qty", 0)
         curr = d_ind.get("current", 0)
@@ -381,12 +500,8 @@ class StockAnalyzer:
             ichi, disc_text, disc_label, report,
         )
 
-        resp = self.client.messages.create(
-            model=config.CLAUDE_MODEL,
-            max_tokens=1200,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.content[0].text
+        text, provider = self._call_ai(prompt)
+        return f"{text.rstrip()}\n\n🤖 AI: {self._PROVIDER_LABEL[provider]}"
 
     def _build_prompt(
         self, ticker, name, qty, curr, currency, overseas,
@@ -394,6 +509,14 @@ class StockAnalyzer:
     ) -> str:
 
         fp = lambda v: _fp(v, overseas)
+
+        # 전일비 변동률 (일봉 기준)
+        chg_pct  = d.get("change_pct")
+        if chg_pct is None or (isinstance(chg_pct, float) and np.isnan(chg_pct)):
+            chg_str = ""
+        else:
+            sign_ch = "+" if chg_pct >= 0 else ""
+            chg_str = f" ({sign_ch}{chg_pct:.2f}%)"
 
         # 재무 요약 (국내만)
         fin = ""
@@ -485,7 +608,7 @@ RSI: {m.get('rsi_signal','N/A')}
 아래 형식으로 텔레그램 채널 메시지를 작성하세요 (이모지 포함, 900자 이내):
 
 [REPORT] {name}({ticker}) [{market_tag}]
-💼 {qty:,}주 | 현재 {currency}{fp(curr)}
+💼 {qty:,}주 | 현재 {currency}{fp(curr)}{chg_str}
 
 🔭 큰그림(월봉)
 · MA10: {{월봉 10선 상황 + 돌파 여부}}
@@ -514,8 +637,6 @@ RSI: {m.get('rsi_signal','N/A')}
 📍 진입: {{가격}}  🛑 손절: {{가격 또는 조건}}
 💰 목표: 1차 {{가격}} / 2차 {{가격}}
 확신도: {{XX%}}
-
-⚡ 최종 매매 결정은 본인이 직접 판단하세요.
 """
 
     @property

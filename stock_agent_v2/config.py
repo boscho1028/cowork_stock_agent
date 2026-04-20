@@ -12,9 +12,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Claude AI ────────────────────────────────────────────────────────
+# ── AI 모델 ──────────────────────────────────────────────────────────
+# Primary 선택 (claude | gemini). 기본 claude. 실패 시 반대 모델로 폴백.
+AI_PRIMARY        = os.getenv("AI_PRIMARY", "claude").lower()
+
+# Claude (Anthropic)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL      = "claude-sonnet-4-5"
+
+# Gemini (Google)
+GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
+GEMINI_MODEL      = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Gemini 2.5 Flash 추론 토큰 예산. 0=OFF(가장 빠름·저품질), 512=가벼운 추론,
+# 1024=중간(권장), 2048=Pro에 근접. 높일수록 품질↑ 지연·비용↑.
+GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "1024"))
 
 # ── 텔레그램 ─────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
