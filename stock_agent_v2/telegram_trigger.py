@@ -5,6 +5,7 @@ telegram_trigger.py - 텔레그램 봇 명령어로 분석 트리거
 명령어 목록:
   /analyze      전체 포트폴리오 분석
   /single XXXX  단일 종목 분석 (예: /single 005930)
+  /signals      universe 시그널 스캔 (규칙 기반, 빠름)
   /dart         DART/SEC 공시만 확인
   /weekly       주간 리포트
   /status       현재 실행 상태 확인
@@ -204,6 +205,15 @@ def handle_command(chat_id: int, text: str, user_name: str):
     elif cmd in ("/dart", "/공시"):
         run_script(chat_id, "run_dart.py", task_name="공시확인")
 
+    # 시그널 스캔 (/signals 만 입력 → universe 전체 / /signals TICKER → 해당 종목만)
+    elif cmd in ("/signals", "/시그널"):
+        if args:
+            tk = args[0].upper()
+            run_script(chat_id, "run_signals.py", args=[tk],
+                       task_name=f"{tk}시그널")
+        else:
+            run_script(chat_id, "run_signals.py", task_name="시그널스캔")
+
     # 주간 리포트
     elif cmd in ("/weekly", "/주간"):
         run_script(chat_id, "run_weekly.py", task_name="주간리포트")
@@ -251,6 +261,10 @@ def handle_command(chat_id: int, text: str, user_name: str):
             "   예) /single NVDA\n\n"
             "[START] /dart\n"
             "   DART + SEC 공시 확인\n\n"
+            "[START] /signals [종목코드]\n"
+            "   시그널 스캔 (규칙 기반)\n"
+            "   · 인자 없음: universe 전체\n"
+            "   · 종목코드: 해당 종목만\n\n"
             "[START] /weekly\n"
             "   주간 전략 리포트\n\n"
             "[START] /portfolio\n"

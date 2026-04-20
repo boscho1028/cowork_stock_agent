@@ -1,14 +1,21 @@
 """
 main.py - KIS API 버전 실행 진입점
 
+데이터 흐름:
+  - 수집 대상 : universe.csv (관찰 종목 전체)
+  - 분석 대상 : portfolio.csv (매일 리포트 생성 종목)
+  - 시그널   : universe 전체 스캔, Claude 호출 없이 규칙 기반 발동 종목만 요약 전송
+  - portfolio ⊆ universe (portfolio-only 종목은 자동 편입)
+
 사용법:
-  python main.py --init                    # 최초 1회: DB생성 + 5년치 + DART
-  python main.py --update                  # 증분 업데이트만
-  python main.py --analyze                 # 전체 분석 + 채널 전송
+  python main.py --init                    # 최초 1회: DB생성 + 5년치 캔들(universe) + 공시
+  python main.py --update                  # 증분 업데이트 (universe 전체)
+  python main.py --analyze                 # portfolio 분석 + 채널 전송
   python main.py --analyze --ticker 005930 # 단일 종목 분석
-  python main.py --dart-only               # 공시 확인만
-  python main.py --weekly                  # 주간 리포트
-  python main.py                           # 스케줄 모드 (주중 08:00)
+  python main.py --dart-only               # portfolio 공시 확인만
+  python main.py --weekly                  # portfolio 주간 리포트
+  python main.py --signals                 # universe 시그널 스캔 + 요약 전송
+  python main.py                           # 스케줄 모드 (주중 08:00 → update+analyze)
 """
 
 import os
@@ -18,12 +25,13 @@ import schedule
 from datetime import datetime
 
 import config
-from database       import init_db, save_analysis, mark_sent
-from kis_collector  import KISCollector          # KIS REST API
-from dart_collector import DartCollector
-from sec_collector  import SECCollector
-from analyzer       import StockAnalyzer
-from telegram_bot   import TelegramNotifier
+from database         import init_db, save_analysis, mark_sent, load_candles
+from kis_collector    import KISCollector          # KIS REST API
+from dart_collector   import DartCollector
+from sec_collector    import SECCollector
+from analyzer         import StockAnalyzer
+from telegram_bot     import TelegramNotifier
+from chart_generator  import generate_chart, combine_charts_vertical
 
 
 def _get_arg(args, key, default=None):
@@ -38,7 +46,7 @@ def _get_arg(args, key, default=None):
 # ── 커맨드 함수 ───────────────────────────────────────────────────────
 
 def cmd_init():
-    """최초 1회 전체 초기화"""
+    """최초 1회 전체 초기화 (universe 전체에 대해 5년치 캔들 + 공시 적재)"""
     print("=" * 55)
     print("  KIS 초기화 시작 (5년치 캔들 + DART 전체 공시)")
     print("=" * 55)
@@ -49,29 +57,29 @@ def cmd_init():
         print("[ERROR] KIS 토큰 발급 실패 — App Key/Secret 확인")
         return
 
-    kis.run_initial_load(config.PORTFOLIO, years=5)
+    kis.run_initial_load(config.UNIVERSE, years=5)
 
     dart = DartCollector()
     print("\n[DART] 초기 공시 수집 시작...")
-    dart.fetch_all_tickers(config.PORTFOLIO, days_back=365 * 5)
+    dart.fetch_all_tickers(config.UNIVERSE, days_back=365 * 5)
 
     print("\n[DART] 재무보고서 수집 시작...")
-    for ticker in config.PORTFOLIO:
-        name = config.PORTFOLIO_DETAIL.get(ticker, (ticker,))[0]
+    for ticker in config.UNIVERSE:
+        name = config.UNIVERSE_DETAIL.get(ticker, (ticker,))[0]
         print(f"  [{ticker}] {name} 재무 수집 중...")
         dart.fetch_financial_report(ticker)
         time.sleep(0.5)
 
     # SEC EDGAR 초기 적재 (해외 종목)
     sec = SECCollector()
-    sec.fetch_initial(config.PORTFOLIO, days_back=365)
+    sec.fetch_initial(config.UNIVERSE, days_back=365)
 
     print("\n[OK] 초기화 완료. python main.py --analyze 로 분석 시작하세요.")
 
 
 def cmd_update(tickers=None):
-    """증분 업데이트: 전 영업일 캔들 + T-1 공시"""
-    targets = tickers or config.PORTFOLIO
+    """증분 업데이트: 전 영업일 캔들 + T-1 공시. 기본 타겟 = universe."""
+    targets = tickers or config.UNIVERSE
 
     kis = KISCollector()
     if not kis.login():
@@ -84,6 +92,24 @@ def cmd_update(tickers=None):
 
     sec = SECCollector()
     sec.fetch_all_tickers(targets, days_back=3)    # T-1: 해외 (SEC EDGAR)
+
+
+def _make_chart(ticker: str, name: str) -> dict:
+    """일/주/월 차트를 한 장으로 합쳐 반환. {"combined": bytes}."""
+    parts = {}
+    for interval, limit in [("D", 400), ("W", 260), ("M", 60)]:
+        try:
+            df = load_candles(ticker, interval, limit=limit)
+            if not df.empty:
+                parts[interval] = generate_chart(
+                    df, ticker, name, config.INDICATOR_CONFIG, interval=interval
+                )
+        except Exception as e:
+            lbl = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
+            print(f"  [WARN] {ticker} {lbl} 차트 생성 실패: {e}")
+
+    combined = combine_charts_vertical(parts)
+    return {"combined": combined} if combined else {}
 
 
 def cmd_analyze(tickers=None, header=""):
@@ -109,7 +135,8 @@ def cmd_analyze(tickers=None, header=""):
         try:
             text = analyzer.analyze(ticker)
             save_analysis(ticker, text)
-            ok_results.append({"ticker": ticker, "analysis": text, "ok": True})
+            charts = _make_chart(ticker, name)
+            ok_results.append({"ticker": ticker, "analysis": text, "ok": True, "charts": charts})
             print(f"  [OK] {ticker} {name}")
         except Exception as e:
             import traceback
@@ -173,6 +200,41 @@ def cmd_dart_only(tickers=None):
     print("[OK] 공시 확인 완료")
 
 
+def cmd_signals(tickers=None):
+    """
+    시그널 스캔 → 발동 시그널 요약 텔레그램 전송 (Claude 호출 없음)
+    tickers=None : universe 전체
+    tickers=[..]: 지정 종목만
+    """
+    from signals import evaluate_signals, format_report
+
+    if tickers:
+        targets = [t.strip().upper() for t in tickers]
+        header  = f"[SIGNAL] {','.join(targets)} 단일 시그널 스캔"
+    else:
+        targets = list(config.UNIVERSE)
+        header  = ""
+
+    notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
+    print(f"[SIGNAL] {len(targets)}종목 스캔 시작" + (" (단일)" if tickers else ""))
+
+    all_sigs = []
+    for ticker in targets:
+        info = config.UNIVERSE_DETAIL.get(ticker) or config.PORTFOLIO_DETAIL.get(ticker) or (ticker,)
+        name = info[0] if isinstance(info, tuple) else ticker
+        try:
+            sigs = evaluate_signals(ticker, name)
+            if sigs:
+                print(f"  ▶ {ticker} {name}: {len(sigs)}건")
+            all_sigs.extend(sigs)
+        except Exception as e:
+            print(f"  [WARN] {ticker}: {e}")
+
+    text = format_report(all_sigs, len(targets), header=header)
+    notifier.send(text)
+    print(f"[OK] 시그널 전송 완료 (발동 {len(all_sigs)}건)")
+
+
 def cmd_weekly_report():
     """주봉·월봉 중심 주간 리포트 + 파일 저장 + 채널 전송"""
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
@@ -227,6 +289,7 @@ if __name__ == "__main__":
         cmd_analyze(tickers, header)
     elif "--dart-only" in args: cmd_dart_only(tickers)
     elif "--weekly"    in args: cmd_weekly_report()
+    elif "--signals"   in args: cmd_signals(tickers)
     else:
         # 스케줄 모드: 주중(월~금) 08:00 단 1회
         print(f"스케줄 모드 | 주중(월~금) {config.SCHEDULE_TIME} 자동 실행")

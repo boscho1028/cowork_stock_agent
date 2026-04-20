@@ -211,15 +211,19 @@ def upsert_disclosures(rows: list) -> int:
     return len(rows)
 
 
-def load_disclosures(ticker: str, limit: int = 10) -> list:
+def load_disclosures(ticker: str, limit: int = 10, since_date: str = None) -> list:
+    """
+    since_date: YYYYMMDD (DART rcept_dt 포맷). None이면 전체.
+    """
+    sql    = "SELECT rcept_no, report_nm, rcept_dt, flr_nm, rm FROM dart_disclosures WHERE ticker=?"
+    params = [ticker]
+    if since_date:
+        sql += " AND rcept_dt >= ?"
+        params.append(since_date.replace("-", ""))
+    sql += " ORDER BY rcept_dt DESC LIMIT ?"
+    params.append(limit)
     with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT rcept_no, report_nm, rcept_dt, flr_nm, rm
-            FROM   dart_disclosures
-            WHERE  ticker=?
-            ORDER  BY rcept_dt DESC
-            LIMIT  ?
-        """, (ticker, limit)).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 

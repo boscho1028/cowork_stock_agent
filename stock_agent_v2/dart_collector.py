@@ -160,10 +160,11 @@ class DartCollector:
         return data
 
     # ── 공시 요약 텍스트 (AI 프롬프트용) ─────────────────────────────
-    def get_disclosure_summary(self, ticker: str, limit: int = 5) -> str:
-        rows = load_disclosures(ticker, limit=limit)
+    def get_disclosure_summary(self, ticker: str, limit: int = 5, since_date: str = None) -> str:
+        """since_date: YYYYMMDD, None이면 전체."""
+        rows = load_disclosures(ticker, limit=limit, since_date=since_date)
         if not rows:
-            return "전 영업일 특별 공시 없음"
+            return "해당 기간 특별 공시 없음"
 
         def get_emoji(nm):
             for emoji, kws in URGENCY_MAP.items():

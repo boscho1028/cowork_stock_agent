@@ -6,6 +6,7 @@ analyzer.py - 기술적 지표 + Claude AI 분석
   - 해외주식 대응 (통화 표시, 공시 스킵)
 """
 
+from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import anthropic
@@ -13,6 +14,18 @@ import config
 from database import load_candles, load_latest_report
 from dart_collector import DartCollector
 from sec_collector  import SECCollector
+
+
+def _t_minus_1_business_day() -> datetime:
+    """오늘 기준 T-1 영업일(= 오늘 포함 최근 2영업일의 시작일)."""
+    d = datetime.today()
+    found = 0
+    while True:
+        if d.weekday() < 5:
+            found += 1
+            if found >= 2:
+                return d
+        d -= timedelta(days=1)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -336,15 +349,20 @@ class StockAnalyzer:
         # 일목균형표 (일봉 기준, 400봉으로 충분)
         ichi = compute_ichimoku(daily, cfg)
 
-        # T-1 공시 (국내=DART, 해외=SEC EDGAR)
+        # T-0/T-1 공시 (오늘 + 전 영업일). 휴일 대비 fetch는 5일치로 넉넉히.
+        t1         = _t_minus_1_business_day()
+        since_dart = t1.strftime("%Y%m%d")
+        since_sec  = t1.strftime("%Y-%m-%d")
+        range_lbl  = f"{t1.strftime('%m/%d')}~{datetime.today().strftime('%m/%d')}"
+
         if overseas:
-            self.sec.fetch_filings(ticker, days_back=3)
-            disc_text = self.sec.get_filing_summary(ticker, limit=5)
-            disc_label = "SEC EDGAR 공시 (T-1)"
+            self.sec.fetch_filings(ticker, days_back=5)
+            disc_text  = self.sec.get_filing_summary(ticker, since_date=since_sec, limit=15)
+            disc_label = f"SEC 공시 ({range_lbl}, T-0/T-1)"
         else:
-            self.dart.fetch_special_disclosures(ticker, days_back=3)
-            disc_text  = self.dart.get_disclosure_summary(ticker, limit=5)
-            disc_label = "DART 특별 공시 (T-1)" 
+            self.dart.fetch_special_disclosures(ticker, days_back=5)
+            disc_text  = self.dart.get_disclosure_summary(ticker, since_date=since_dart, limit=15)
+            disc_label = f"DART 특별공시 ({range_lbl}, T-0/T-1)"
 
         # 재무 (국내만)
         report = load_latest_report(ticker) if not overseas else None
@@ -487,7 +505,10 @@ RSI: {m.get('rsi_signal','N/A')}
 · 지지: {{지지레벨}} | 저항: {{저항레벨}}
 · {{전환/기준선 크로스 여부}}
 
-[DART] {disc_label}: {{주요 공시 또는 "특이 없음"}}
+[DART] {disc_label}
+· {{최근 2영업일(T-0/T-1) 공시가 없으면 "특이 없음" 한 줄.
+   있으면 각 공시를 한 줄씩 중요도 이모지와 함께 나열하고,
+   바로 아래에 2~3줄로 핵심 내용·투자 관점 의미를 요약}}
 
 🎯 전략: 매수고려 / 관망 / 비중축소 중 하나
 📍 진입: {{가격}}  🛑 손절: {{가격 또는 조건}}

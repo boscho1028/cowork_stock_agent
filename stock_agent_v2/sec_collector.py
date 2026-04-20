@@ -331,19 +331,24 @@ class SECCollector:
 
     # ── 공시 요약 텍스트 생성 (AI 프롬프트용) ────────────────────────
 
-    def get_filing_summary(self, ticker: str, limit: int = 5) -> str:
-        """DB에서 최근 공시 → 프롬프트용 텍스트"""
+    def get_filing_summary(self, ticker: str, limit: int = 5, since_date: str = None) -> str:
+        """
+        DB에서 최근 공시 → 프롬프트용 텍스트
+        since_date: YYYY-MM-DD (SEC filed_date 포맷). None이면 전체.
+        """
+        sql    = ("SELECT form_type, filed_date, description, items, importance "
+                  "FROM sec_filings WHERE ticker = ?")
+        params = [ticker.upper()]
+        if since_date:
+            sql += " AND filed_date >= ?"
+            params.append(since_date)
+        sql += " ORDER BY filed_date DESC LIMIT ?"
+        params.append(limit)
         with _get_conn() as conn:
-            rows = conn.execute("""
-                SELECT form_type, filed_date, description, items, importance
-                FROM   sec_filings
-                WHERE  ticker = ?
-                ORDER  BY filed_date DESC
-                LIMIT  ?
-            """, (ticker.upper(), limit)).fetchall()
+            rows = conn.execute(sql, params).fetchall()
 
         if not rows:
-            return "최근 SEC 공시 없음"
+            return "해당 기간 SEC 공시 없음"
 
         lines = []
         for r in rows:
