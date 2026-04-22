@@ -106,22 +106,36 @@ class KISCollector:
             mode = "모의" if self.is_paper else "실전"
             print(f"  [KIS] {mode}투자 공유 토큰 재사용 (유효: {self._token_exp:%m-%d %H:%M}까지)")
             return self._token
-        # 3) 신규 발급
-        resp = self.sess.post(
-            f"{self.base_url}/oauth2/tokenP",
-            json={"grant_type": "client_credentials",
-                  "appkey": self.app_key, "appsecret": self.app_secret},
-            timeout=10,
-        )
-        data = resp.json()
-        if "access_token" not in data:
-            raise RuntimeError(f"토큰 발급 실패: {data}")
-        self._token     = data["access_token"]
-        self._token_exp = now + timedelta(hours=11, minutes=50)
-        self._save_shared_token(self._token, self._token_exp)
+        # 3) 신규 발급 (EGW00133 race 대응: 다른 PC가 방금 발급 중일 수 있으므로
+        #    짧게 대기하며 공유 캐시 재확인, 그래도 없으면 재시도)
         mode = "모의" if self.is_paper else "실전"
-        print(f"  [KIS] {mode}투자 토큰 신규 발급 (유효: {self._token_exp:%m-%d %H:%M}까지)")
-        return self._token
+        last_data: dict = {}
+        for attempt in range(3):
+            resp = self.sess.post(
+                f"{self.base_url}/oauth2/tokenP",
+                json={"grant_type": "client_credentials",
+                      "appkey": self.app_key, "appsecret": self.app_secret},
+                timeout=10,
+            )
+            data = resp.json()
+            if "access_token" in data:
+                self._token     = data["access_token"]
+                self._token_exp = datetime.now() + timedelta(hours=11, minutes=50)
+                self._save_shared_token(self._token, self._token_exp)
+                print(f"  [KIS] {mode}투자 토큰 신규 발급 (유효: {self._token_exp:%m-%d %H:%M}까지)")
+                return self._token
+            last_data = data
+            if data.get("error_code") != "EGW00133" or attempt == 2:
+                break
+            wait = 15 * (attempt + 1)   # 15s, 30s
+            print(f"  [KIS] 1분 1회 제한(EGW00133) — {wait}초 대기 후 공유 캐시 재확인")
+            time.sleep(wait)
+            cached = self._load_shared_token()
+            if cached:
+                self._token, self._token_exp = cached
+                print(f"  [KIS] 공유 토큰 발견·재사용 (유효: {self._token_exp:%m-%d %H:%M}까지)")
+                return self._token
+        raise RuntimeError(f"토큰 발급 실패: {last_data}")
 
     def _dom_headers(self) -> dict:
         return {
