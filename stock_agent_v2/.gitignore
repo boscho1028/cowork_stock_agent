@@ -20,6 +20,9 @@ data/*.db-wal
 # 테스트 출력
 test_chart_*.png
 
+# 로그
+logs/
+
 # Claude Code 로컬 세션
 .claude/
 

@@ -214,18 +214,17 @@ def _signal_disclosure(ticker, name, overseas) -> List[Signal]:
     t1 = _t_minus_1_bday()
 
     if overseas:
-        # SEC: importance 컬럼 그대로 사용
-        import sqlite3
-        from pathlib import Path
-        db_path = Path(__file__).parent / "data" / "stock_agent.db"
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("""
+        # SEC: importance 컬럼 그대로 사용 (database.get_conn 사용 → Turso replica)
+        from database import get_conn as _get_conn
+        with _get_conn() as conn:
+            cur = conn.execute("""
                 SELECT form_type, filed_date, items, importance, description
                 FROM sec_filings
                 WHERE ticker=? AND filed_date >= ?
                 ORDER BY filed_date DESC LIMIT 10
-            """, (ticker.upper(), t1.strftime("%Y-%m-%d"))).fetchall()
+            """, (ticker.upper(), t1.strftime("%Y-%m-%d")))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         out = []
         for r in rows:
             if r["importance"] == "🔴":

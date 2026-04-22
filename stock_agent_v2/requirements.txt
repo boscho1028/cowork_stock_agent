@@ -10,6 +10,10 @@ numpy>=1.24.0              # 지표 계산·시그널
 # ── 차트 ────────────────────────────────────────────────────────
 matplotlib>=3.7.0          # chart_generator (Pillow는 matplotlib 의존성으로 자동 설치)
 
+# ── DB (Turso embedded replicas) ────────────────────────────────
+libsql>=0.1.11             # Turso / libSQL 파이썬 바인딩 (로컬 replica + 클라우드 sync)
+                           # Windows prebuilt wheel 제공 (구 libsql-experimental 후속)
+
 # ── 유틸 ────────────────────────────────────────────────────────
 schedule>=1.2.0            # main.py 일일 배치 스케줄
 python-dotenv>=1.0.0       # .env 로더

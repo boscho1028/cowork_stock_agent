@@ -40,6 +40,26 @@ KIS_APP_SECRET    = os.getenv("KIS_APP_SECRET",    "")
 KIS_ACCOUNT_NO    = os.getenv("KIS_ACCOUNT_NO",    "")
 KIS_PAPER_TRADING = os.getenv("KIS_PAPER_TRADING", "false").lower() == "true"
 
+# KIS 토큰 공유 캐시 경로 (PC마다 Google Drive 마운트 경로가 다를 수 있음)
+# .env 에 PC별로 KIS_TOKEN_CACHE_DIR 를 지정 — 미지정이면 후보 경로 자동 탐색
+_TOKEN_DIR_CANDIDATES = [
+    r"G:\내 드라이브\03_Cloud\KIS_token",
+    r"H:\내 드라이브\03_Cloud\KIS_token",
+    os.path.expanduser(r"~\Google Drive\내 드라이브\03_Cloud\KIS_token"),
+    os.path.expanduser(r"~\My Drive\03_Cloud\KIS_token"),
+]
+KIS_TOKEN_CACHE_DIR = os.getenv("KIS_TOKEN_CACHE_DIR", "") or next(
+    (p for p in _TOKEN_DIR_CANDIDATES if os.path.isdir(p)),
+    _TOKEN_DIR_CANDIDATES[0],  # 어느 것도 없으면 첫 후보(생성 시도용)
+)
+
+# ── Turso (libSQL) ───────────────────────────────────────────────────
+# embedded replica: 로컬 SQLite 파일을 읽고, 변경분만 Turso 클라우드와 동기화
+# 두 PC가 같은 Turso DB에 쓰기·읽기하여 데이터 공유.
+# URL/TOKEN 이 비어 있으면 database.py는 순수 로컬 모드로 동작(폴백).
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "")
+TURSO_AUTH_TOKEN   = os.getenv("TURSO_AUTH_TOKEN",   "")
+
 # ── 스케줄 ───────────────────────────────────────────────────────────
 SCHEDULE_TIME = "08:00"
 

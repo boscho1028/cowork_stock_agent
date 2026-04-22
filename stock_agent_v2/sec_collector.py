@@ -17,13 +17,14 @@ API 엔드포인트:
 import time
 import json
 import requests
-import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
-from contextlib import contextmanager
 
-# DB 경로 (database.py와 동일 위치)
+# DB 커넥션은 database.get_conn() 을 통해 사용 (Turso embedded replica + sync)
+from database import get_conn as _db_get_conn
+
+# DB 경로 (database.py와 동일 위치 — 참고용 상수)
 DB_PATH = Path(__file__).parent / "data" / "stock_agent.db"
 
 # SEC EDGAR API (인증 불필요)
@@ -74,23 +75,20 @@ ITEM_KEYWORDS = {
 EXCLUDE_ITEMS = ["8.01", "7.01"]  # Other Events, Regulation FD
 
 
-@contextmanager
-def _get_conn():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+def _get_conn(write: bool = False):
+    """database.get_conn 위임. 쓰기 시 sync_after=True 로 Turso 동기화."""
+    return _db_get_conn(sync_after=write)
+
+
+def _rows_to_dicts(cur) -> list:
+    """커서의 결과를 [{col: value, ...}, ...] 로 변환 (libsql Row 는 dict-like 보장 안됨)."""
+    cols = [d[0] for d in cur.description] if cur.description else []
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 def _init_sec_tables():
     """SEC 공시 테이블 생성 (없으면)"""
-    with _get_conn() as conn:
+    with _get_conn(write=True) as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS sec_filings (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,10 +140,9 @@ class SECCollector:
     def _load_cik_cache(self):
         """DB에서 CIK 캐시 로드"""
         with _get_conn() as conn:
-            rows = conn.execute(
-                "SELECT ticker, cik_padded FROM sec_cik_map"
-            ).fetchall()
-        self._cik_cache = {r["ticker"]: r["cik_padded"] for r in rows}
+            cur  = conn.execute("SELECT ticker, cik_padded FROM sec_cik_map")
+            rows = cur.fetchall()
+        self._cik_cache = {r[0]: r[1] for r in rows}
 
     def _get_cik(self, ticker: str) -> str | None:
         """티커 → CIK 10자리 반환 (캐시 우선, 없으면 API 조회)"""
@@ -180,7 +177,7 @@ class SECCollector:
             }
 
             # 전체를 DB에 저장 (한 번만 다운로드)
-        with _get_conn() as conn:
+        with _get_conn(write=True) as conn:
             conn.executemany(
                 """INSERT OR REPLACE INTO sec_cik_map
                    (ticker, cik, cik_padded, company)
@@ -290,17 +287,18 @@ class SECCollector:
                 "url":         edgar_url,
             })
 
-        # DB 저장
+        # DB 저장 (libsql 은 dict 바인딩 미지원 → 튜플로 변환)
         if collected:
-            with _get_conn() as conn:
+            cols = ["ticker", "cik", "accession", "form_type", "filed_date",
+                    "description", "items", "importance", "url"]
+            tuples = [tuple(r[c] for c in cols) for r in collected]
+            with _get_conn(write=True) as conn:
                 conn.executemany("""
                     INSERT OR IGNORE INTO sec_filings
                         (ticker, cik, accession, form_type, filed_date,
                          description, items, importance, url)
-                    VALUES
-                        (:ticker, :cik, :accession, :form_type, :filed_date,
-                         :description, :items, :importance, :url)
-                """, collected)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """, tuples)
             print(f"  [SEC] {ticker}: {len(collected)}건 저장 ({cutoff_date} 이후)")
 
         time.sleep(0.2)   # SEC rate limit 준수 (초당 10회)
@@ -345,7 +343,7 @@ class SECCollector:
         sql += " ORDER BY filed_date DESC LIMIT ?"
         params.append(limit)
         with _get_conn() as conn:
-            rows = conn.execute(sql, params).fetchall()
+            rows = _rows_to_dicts(conn.execute(sql, params))
 
         if not rows:
             return "해당 기간 SEC 공시 없음"

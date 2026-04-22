@@ -13,15 +13,27 @@ kis_collector.py - 국내 + 해외주식 통합 수집
   주의: 해외는 1회 100개 고정, 연속 조회 불가 → BYMD로 기준일 이동
 """
 
+import json
 import time
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+from pathlib import Path
 from database import upsert_candles, get_latest_candle_date, load_candles
 import config
 
 CALL_INTERVAL_REAL  = 1.0
 CALL_INTERVAL_PAPER = 1.5
+
+# 최근 5개 봉은 매번 재조회해서 덮어쓴다.
+# (진행 중 일/주/월 캔들은 마감 전까지 값이 계속 바뀌고, 수정주가·정정공시도 사후 반영됨)
+# D=7일(≈5영업일), W=35일(5주), M=150일(5개월)
+REFRESH_DAYS = {"D": 7, "W": 35, "M": 150}
+
+# KIS 토큰 공유 캐시 (여러 PC가 Google Drive를 통해 같은 토큰 재사용)
+# KIS는 appkey당 1분 1회 발급 제한이 있어 파일 공유로 불필요한 재발급을 막는다.
+# 경로는 config.KIS_TOKEN_CACHE_DIR (PC마다 .env 로 오버라이드 가능)
+TOKEN_CACHE_DIR = Path(config.KIS_TOKEN_CACHE_DIR)
 
 
 class KISCollector:
@@ -50,10 +62,51 @@ class KISCollector:
         self.sess.headers.update({"Content-Type": "application/json; charset=utf-8"})
 
     # ── 인증 ──────────────────────────────────────────────────────────
+    def _token_cache_file(self) -> Path:
+        mode = "paper" if self.is_paper else "real"
+        # appkey 앞 8자리를 파일명에 포함 → 다른 앱키를 쓰는 PC와 섞이지 않게
+        return TOKEN_CACHE_DIR / f"kis_token_{mode}_{self.app_key[:8]}.json"
+
+    def _load_shared_token(self) -> tuple[str, datetime] | None:
+        path = self._token_cache_file()
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            exp = datetime.fromisoformat(data["expires_at"])
+            # 만료 30초 전까지만 유효 처리 (클럭 스큐·전송 지연 여유)
+            if datetime.now() + timedelta(seconds=30) >= exp:
+                return None
+            return data["access_token"], exp
+        except Exception as e:
+            print(f"  [KIS] 공유 토큰 읽기 실패 (무시하고 재발급): {e}")
+            return None
+
+    def _save_shared_token(self, token: str, exp: datetime) -> None:
+        path = self._token_cache_file()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump({"access_token": token, "expires_at": exp.isoformat()}, f)
+            tmp.replace(path)  # 원자적 교체
+        except Exception as e:
+            print(f"  [KIS] 공유 토큰 저장 실패 (메모리 캐시만 사용): {e}")
+
     def _get_token(self) -> str:
         now = datetime.now()
+        # 1) 프로세스 메모리 캐시
         if self._token and self._token_exp and now < self._token_exp:
             return self._token
+        # 2) Google Drive 공유 캐시 (다른 PC가 발급한 토큰 재사용)
+        cached = self._load_shared_token()
+        if cached:
+            self._token, self._token_exp = cached
+            mode = "모의" if self.is_paper else "실전"
+            print(f"  [KIS] {mode}투자 공유 토큰 재사용 (유효: {self._token_exp:%m-%d %H:%M}까지)")
+            return self._token
+        # 3) 신규 발급
         resp = self.sess.post(
             f"{self.base_url}/oauth2/tokenP",
             json={"grant_type": "client_credentials",
@@ -65,8 +118,9 @@ class KISCollector:
             raise RuntimeError(f"토큰 발급 실패: {data}")
         self._token     = data["access_token"]
         self._token_exp = now + timedelta(hours=11, minutes=50)
+        self._save_shared_token(self._token, self._token_exp)
         mode = "모의" if self.is_paper else "실전"
-        print(f"  [KIS] {mode}투자 토큰 발급 (유효: {self._token_exp:%H:%M}까지)")
+        print(f"  [KIS] {mode}투자 토큰 신규 발급 (유효: {self._token_exp:%m-%d %H:%M}까지)")
         return self._token
 
     def _dom_headers(self) -> dict:
@@ -270,18 +324,18 @@ class KISCollector:
     def fetch_incremental(
         self, ticker: str, interval: str, last_date: str
     ) -> pd.DataFrame:
-        start_dt = datetime.strptime(last_date, "%Y-%m-%d") + timedelta(days=1)
+        refresh  = REFRESH_DAYS.get(interval, 7)
+        # 최근 5봉은 매번 재조회해서 덮어쓴다 (값 변동·수정주가 보정)
+        start_dt = datetime.strptime(last_date, "%Y-%m-%d") - timedelta(days=refresh)
         end_dt   = datetime.today()
-        if start_dt > end_dt:
-            return pd.DataFrame()
 
         if config.is_overseas(ticker):
-            # 해외: BYMD 없이 최근 100개 조회 후 last_date 이후만 필터
+            # 해외: BYMD 없이 최근 100개 조회 → 재조회 구간만 필터
             df = self._fetch_overseas_once(ticker, interval, "")
             time.sleep(self.interval)
             if df.empty:
                 return df
-            return df[df.index > pd.to_datetime(last_date)]
+            return df[df.index >= pd.to_datetime(start_dt)]
         else:
             df = self._fetch_domestic_once(
                 ticker, interval,
@@ -391,8 +445,6 @@ class KISCollector:
 
             for interval in ("D", "W", "M"):
                 last = get_latest_candle_date(ticker, interval)
-                if last and last >= today:
-                    continue
                 label = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
                 print(f"  [{ticker}] {label} 증분 업데이트")
                 try:

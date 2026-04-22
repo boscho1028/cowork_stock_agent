@@ -1,21 +1,97 @@
 """
-database.py - SQLite 스키마 정의 및 CRUD
-테이블: candles / dart_disclosures / dart_reports / analysis_log
+database.py - libSQL (Turso) embedded replica + SQLite 폴백
+- 평상시: 로컬 replica 파일(data/stock_agent.db)에서 읽고,
+          쓰기 후 Turso 클라우드로 sync → 다른 PC와 공유
+- 환경변수 TURSO_DATABASE_URL/TURSO_AUTH_TOKEN이 없으면 로컬 SQLite만 사용(폴백)
+테이블: candles / dart_disclosures / dart_reports / analysis_log / sec_filings / sec_cik_map
 """
 
-import sqlite3
 import pandas as pd
 from pathlib import Path
 from contextlib import contextmanager
-from datetime import datetime
+
+import config
+
+# libsql 바인딩 (Turso 공식, Windows prebuilt wheel 지원).
+# 미설치/미지원 환경이면 sqlite3로 자동 폴백.
+try:
+    import libsql  # type: ignore
+    _HAS_LIBSQL = True
+except Exception:
+    import sqlite3 as libsql  # type: ignore
+    _HAS_LIBSQL = False
 
 DB_PATH = Path(__file__).parent / "data" / "stock_agent.db"
 
+_TURSO_ENABLED = bool(config.TURSO_DATABASE_URL and config.TURSO_AUTH_TOKEN and _HAS_LIBSQL)
+
+
+def _new_conn():
+    """새 연결 생성. Turso 설정이 있으면 embedded replica, 아니면 순수 로컬."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if _TURSO_ENABLED:
+        return libsql.connect(
+            str(DB_PATH),
+            sync_url=config.TURSO_DATABASE_URL,
+            auth_token=config.TURSO_AUTH_TOKEN,
+        )
+    return libsql.connect(str(DB_PATH))
+
+
+def _try_sync(conn):
+    """Turso 모드일 때만 sync (실패해도 무시 — 로컬은 이미 커밋됨)."""
+    if not _TURSO_ENABLED:
+        return
+    try:
+        conn.sync()
+    except Exception as e:
+        print(f"[DB] Turso sync 실패(로컬 커밋은 완료): {e}")
+
+
+def _migrate_legacy_sqlite():
+    """
+    Turso 모드인데 DB_PATH 가 구버전 순수 SQLite 파일이면 replica 로 열 수 없다.
+    → 자동으로 stock_agent_legacy.db 로 옮겨 빈 replica 로 시작.
+    기존 데이터는 migrate_to_turso.py 로 이관해야 함.
+    """
+    if not _TURSO_ENABLED or not DB_PATH.exists():
+        return
+    legacy = DB_PATH.with_name(DB_PATH.stem + "_legacy.db")
+    # 이미 legacy 가 있고 DB_PATH 가 그대로라면 → 이미 처리됨
+    if legacy.exists() and DB_PATH.stat().st_size == 0:
+        return
+    try:
+        probe = libsql.connect(
+            str(DB_PATH),
+            sync_url=config.TURSO_DATABASE_URL,
+            auth_token=config.TURSO_AUTH_TOKEN,
+        )
+        probe.sync()
+        probe.close()
+    except Exception as e:
+        msg = str(e)
+        if ("metadata file does not" in msg) or ("invalid local state" in msg):
+            if legacy.exists():
+                legacy.unlink()  # 중복 방지
+            print(f"[DB] 기존 순수 SQLite 감지 → {legacy.name} 으로 이동")
+            print("[DB]   (데이터 이관이 필요하면 python migrate_to_turso.py 실행)")
+            DB_PATH.rename(legacy)
+            # WAL/SHM 도 같이 정리
+            for suffix in ("-wal", "-shm"):
+                side = DB_PATH.with_name(DB_PATH.name + suffix)
+                if side.exists():
+                    side.unlink()
+        else:
+            raise
+
 
 def init_db():
-    """DB 및 테이블 초기화 (없으면 생성)"""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with get_conn() as conn:
+    """DB 및 테이블 초기화 (없으면 생성). Turso 설정 시 최초 pull도 수행."""
+    _migrate_legacy_sqlite()
+    conn = _new_conn()
+    try:
+        # 클라우드에서 최신 스키마·데이터 pull
+        _try_sync(conn)
         conn.executescript("""
         -- ── 캔들 (일/주/월봉 통합) ─────────────────────────────────
         CREATE TABLE IF NOT EXISTS candles (
@@ -106,24 +182,56 @@ def init_db():
             updated_at TEXT DEFAULT (datetime('now','localtime'))
         );
         """)
-    print(f"[DB] 초기화 완료: {DB_PATH}")
+        conn.commit()
+        # 스키마 생성분을 클라우드로 push
+        _try_sync(conn)
+    finally:
+        conn.close()
+    mode = "Turso(embedded replica)" if _TURSO_ENABLED else "로컬 SQLite"
+    print(f"[DB] 초기화 완료 ({mode}): {DB_PATH}")
 
 
 @contextmanager
-def get_conn():
-    """SQLite 커넥션 컨텍스트 매니저"""
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+def get_conn(sync_after: bool = False):
+    """
+    커넥션 컨텍스트 매니저.
+    sync_after=True: 쓰기 성공 후 Turso 클라우드로 push (다른 PC와 공유)
+    """
+    conn = _new_conn()
+    # sqlite3 폴백일 때만 row_factory 설정 (libsql-experimental 은 자체 row 지원)
+    if not _HAS_LIBSQL:
+        try:
+            import sqlite3 as _sq
+            conn.row_factory = _sq.Row
+        except Exception:
+            pass
     try:
         yield conn
         conn.commit()
+        if sync_after:
+            _try_sync(conn)
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _fetch_df(conn, sql: str, params: list) -> pd.DataFrame:
+    """
+    DB-API 커서로 SELECT → DataFrame.
+    pd.read_sql 이 libsql 연결에서 동작 안 할 수 있어 범용 경로로 통일.
+    """
+    cur = conn.execute(sql, params)
+    rows = cur.fetchall()
+    cols = [d[0] for d in cur.description] if cur.description else []
+    return pd.DataFrame(rows, columns=cols)
 
 
 # ── 캔들 CRUD ────────────────────────────────────────────────────────
@@ -147,7 +255,7 @@ def upsert_candles(
          float(row.low),  float(row.close), float(row.volume))
         for idx, row in df.iterrows()
     ]
-    with get_conn() as conn:
+    with get_conn(sync_after=True) as conn:
         if replace_all:
             conn.execute(
                 "DELETE FROM candles WHERE ticker=? AND interval=?",
@@ -177,13 +285,14 @@ def load_candles(
     if start_date:
         sql += " AND date >= ?"
         params.append(start_date)
-    sql += f" ORDER BY date DESC LIMIT {limit}"
+    sql += f" ORDER BY date DESC LIMIT {int(limit)}"
 
     with get_conn() as conn:
-        df = pd.read_sql(sql, conn, params=params, parse_dates=["date"])
+        df = _fetch_df(conn, sql, params)
 
     if df.empty:
         return df
+    df["date"] = pd.to_datetime(df["date"])
     return df.set_index("date").sort_index()
 
 
@@ -202,12 +311,15 @@ def get_latest_candle_date(ticker: str, interval: str):
 def upsert_disclosures(rows: list) -> int:
     if not rows:
         return 0
-    with get_conn() as conn:
+    # libsql 은 dict 바인딩(:name) 미지원 → 튜플 리스트로 변환
+    cols = ["rcept_no", "ticker", "corp_name", "report_nm", "rcept_dt", "rm", "flr_nm"]
+    tuples = [tuple(r.get(c) for c in cols) for r in rows]
+    with get_conn(sync_after=True) as conn:
         conn.executemany("""
             INSERT OR IGNORE INTO dart_disclosures
                 (rcept_no, ticker, corp_name, report_nm, rcept_dt, rm, flr_nm)
-            VALUES (:rcept_no,:ticker,:corp_name,:report_nm,:rcept_dt,:rm,:flr_nm)
-        """, rows)
+            VALUES (?,?,?,?,?,?,?)
+        """, tuples)
     return len(rows)
 
 
@@ -223,40 +335,46 @@ def load_disclosures(ticker: str, limit: int = 10, since_date: str = None) -> li
     sql += " ORDER BY rcept_dt DESC LIMIT ?"
     params.append(limit)
     with get_conn() as conn:
-        rows = conn.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+        cur  = conn.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+    return [dict(zip(cols, r)) for r in rows]
 
 
 def upsert_report(data: dict):
-    with get_conn() as conn:
+    # libsql 은 dict 바인딩(:name) 미지원 → 튜플로 변환
+    cols = ["rcept_no", "ticker", "report_type", "period_end",
+            "revenue", "op_income", "net_income",
+            "total_assets", "total_equity",
+            "per", "pbr", "roe", "debt_ratio", "summary_text"]
+    values = tuple(data.get(c) for c in cols)
+    with get_conn(sync_after=True) as conn:
         conn.execute("""
             INSERT OR REPLACE INTO dart_reports
                 (rcept_no, ticker, report_type, period_end,
                  revenue, op_income, net_income,
                  total_assets, total_equity,
                  per, pbr, roe, debt_ratio, summary_text)
-            VALUES
-                (:rcept_no,:ticker,:report_type,:period_end,
-                 :revenue,:op_income,:net_income,
-                 :total_assets,:total_equity,
-                 :per,:pbr,:roe,:debt_ratio,:summary_text)
-        """, data)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, values)
 
 
 def load_latest_report(ticker: str):
     with get_conn() as conn:
-        row = conn.execute("""
+        cur  = conn.execute("""
             SELECT * FROM dart_reports
             WHERE ticker=?
             ORDER BY period_end DESC LIMIT 1
-        """, (ticker,)).fetchone()
-    return dict(row) if row else None
+        """, (ticker,))
+        cols = [d[0] for d in cur.description]
+        row  = cur.fetchone()
+    return dict(zip(cols, row)) if row else None
 
 
 # ── 분석 로그 ────────────────────────────────────────────────────────
 
 def save_analysis(ticker: str, result_text: str):
-    with get_conn() as conn:
+    with get_conn(sync_after=True) as conn:
         conn.execute("""
             INSERT INTO analysis_log (ticker, analyzed_at, result_text)
             VALUES (?, datetime('now','localtime'), ?)
@@ -264,7 +382,7 @@ def save_analysis(ticker: str, result_text: str):
 
 
 def mark_sent(ticker: str):
-    with get_conn() as conn:
+    with get_conn(sync_after=True) as conn:
         conn.execute("""
             UPDATE analysis_log SET sent_telegram=1
             WHERE ticker=? AND sent_telegram=0

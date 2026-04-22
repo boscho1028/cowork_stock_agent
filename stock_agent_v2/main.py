@@ -12,6 +12,8 @@ main.py - KIS API 버전 실행 진입점
   python main.py --update                  # 증분 업데이트 (universe 전체, 느림)
   python main.py --analyze                 # portfolio 업데이트 + 분석 + 채널 전송 (빠름)
   python main.py --analyze --ticker 005930 # 단일 종목 업데이트 + 분석
+  python main.py --analyze --ticker TSLA --exchange NASDAQ   # 미등록 해외 종목
+  python main.py --analyze --ticker 9988 --exchange HKEX     # 홍콩 등 특정 거래소
   python main.py --dart-only               # portfolio 공시 확인만
   python main.py --weekly                  # portfolio 주간 리포트
   python main.py --signals                 # universe 업데이트 + 시그널 스캔
@@ -21,7 +23,7 @@ main.py - KIS API 버전 실행 진입점
 AI 모델 선택 (전역 기본값은 .env 의 AI_PRIMARY, 런타임 오버라이드는 --model):
   python main.py --analyze --model claude  # Claude 우선(실패 시 Gemini 폴백)
   python main.py --analyze --model gemini  # Gemini 우선(실패 시 Claude 폴백)
-  python main.py                           # 스케줄 모드 (주중 08:00 → update+analyze)
+  python main.py                           # 스케줄 모드 (주중 08:00 → portfolio 업데이트 + 분석)
 """
 
 import os
@@ -29,6 +31,57 @@ import sys
 import time
 import schedule
 from datetime import datetime
+from pathlib import Path
+
+
+# ── 파일 로그 (콘솔 + 파일 tee) ────────────────────────────────────
+# 반드시 config 등 다른 모듈 import 전에 호출해야 그 모듈들의 print 도 캡처된다.
+class _TeeStream:
+    """stdout/stderr 를 콘솔과 파일에 동시 write. 인코딩 실패 시 다른 스트림은 영향 없음."""
+    def __init__(self, *streams):
+        self._streams = streams
+    def write(self, data):
+        for s in self._streams:
+            try:
+                s.write(data)
+            except UnicodeEncodeError:
+                enc = getattr(s, "encoding", None) or "utf-8"
+                s.write(data.encode(enc, errors="replace").decode(enc, errors="replace"))
+            except Exception:
+                pass
+        self.flush()
+    def flush(self):
+        for s in self._streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+    def isatty(self):
+        return any(getattr(s, "isatty", lambda: False)() for s in self._streams)
+
+
+def _setup_file_log() -> Path:
+    """logs/main_YYYYMMDD_HHMMSS.log 로 stdout/stderr 를 tee."""
+    log_dir = Path(__file__).parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"main_{ts}.log"
+    # 파일은 utf-8, 라인 버퍼(1) 로 열어 실시간 저장
+    log_file = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)
+    # 콘솔 인코딩 오류 방지 (Windows cp949 에서 이모지·한자 등 깨짐 방지)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    sys.stdout = _TeeStream(sys.__stdout__, log_file)
+    sys.stderr = _TeeStream(sys.__stderr__, log_file)
+    print(f"[LOG] 로그 파일: {log_path}")
+    return log_path
+
+
+_LOG_PATH = _setup_file_log()
+
 
 import config
 from database         import init_db, save_analysis, mark_sent, load_candles
@@ -302,20 +355,45 @@ def cmd_weekly_report(primary=None):
 # ── 스케줄 래퍼 ───────────────────────────────────────────────────────
 
 def run_daily():
-    """주중 08:00 — portfolio 업데이트 + portfolio 분석 + 채널 전송"""
+    """주중 08:00 — portfolio 업데이트 + portfolio 분석 + 채널 전송.
+    universe 전체 업데이트는 Telegram /update 로 수동 실행.
+    예외 발생 시 traceback 을 로그로 남기고 Telegram 으로도 알림.
+    """
+    import traceback
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 일일 분석 시작")
-    cmd_update(list(config.PORTFOLIO))
-    cmd_analyze(header=f"[REPORT] AI 주식 전략 | {datetime.now().strftime('%m/%d')} 08:00")
+    try:
+        cmd_update(list(config.PORTFOLIO))
+        cmd_analyze(header=f"[REPORT] AI 주식 전략 | {datetime.now().strftime('%m/%d')} 08:00")
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"\n[ERROR] run_daily 실패: {e}\n{tb}")
+        try:
+            TelegramNotifier().send_error(
+                f"일일 배치 실패\n{datetime.now():%Y-%m-%d %H:%M}\n"
+                f"오류: {e}\n로그: {_LOG_PATH.name}"
+            )
+        except Exception as te:
+            print(f"[ERROR] Telegram 알림도 실패: {te}")
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    args       = sys.argv[1:]
-    ticker_arg = _get_arg(args, "--ticker")
-    tickers    = [ticker_arg] if ticker_arg else None
-    header     = _get_arg(args, "--header", default="")
-    model_arg  = _get_arg(args, "--model")  # claude | gemini | None(.env 값)
+    args         = sys.argv[1:]
+    ticker_arg   = _get_arg(args, "--ticker")
+    exchange_arg = _get_arg(args, "--exchange")  # 미등록 종목일 때 거래소 명시 (NASDAQ/NYSE/KRX/HKEX/TSE 등)
+    header       = _get_arg(args, "--header", default="")
+    model_arg    = _get_arg(args, "--model")  # claude | gemini | None(.env 값)
+
+    # 미등록 종목 자동 임시 등록 (KIS 해외거래소 코드·국내여부 판단에 필요)
+    if ticker_arg:
+        ticker_arg = ticker_arg.strip().upper()
+        if ticker_arg not in config.get_portfolio_detail() \
+           and ticker_arg not in config.get_universe_detail():
+            config.register_temp(ticker_arg, exchange=exchange_arg)
+            print(f"[{ticker_arg}] 미등록 종목 → 임시 등록 "
+                  f"({exchange_arg or ('KRX' if ticker_arg.isdigit() else 'NASDAQ')})")
+    tickers = [ticker_arg] if ticker_arg else None
 
     if   "--init"      in args: cmd_init()
     elif "--update"    in args: cmd_update(tickers)
