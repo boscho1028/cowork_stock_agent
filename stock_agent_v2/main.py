@@ -30,7 +30,7 @@ import os
 import sys
 import time
 import schedule
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -375,9 +375,22 @@ def _notify_batch_error(label: str, exc: Exception) -> None:
         print(f"[ERROR] Telegram 알림도 실패: {te}")
 
 
+# 공시 요약 창: 당일 + T-3 캘린더일치 (주말·공휴일 판단 회피)
+_BRIEF_LOOKBACK_DAYS = 3
+_BRIEF_SUMMARY_LIMIT = 50  # 창 안이면 사실상 전부 포함
+
+
+def _format_summary_lines(raw: str) -> list[str]:
+    """공시 요약 텍스트를 개별 공시 라인으로 분해. '없음' 안내는 빈 리스트."""
+    if not raw or "없음" in raw:
+        return []
+    return [ln for ln in raw.splitlines() if ln.strip()]
+
+
 def run_morning_brief():
-    """월~금 07:30 — 미국 포트폴리오 가격·SEC 공시 업데이트 + 한국 DART T-1
-    공시 수집 → 규칙 기반 요약 1건으로 전송 (AI 호출 없음).
+    """월~금 07:30 — 미국 포트폴리오 가격·SEC 공시 업데이트 + 한국 DART
+    공시 수집 → 당일+T-3 캘린더일치 공시를 규칙 기반 목록 + LLM 한줄 요약
+    으로 전송.
 
     미국 포트폴리오가 비어 있으면 해당 섹션은 조용히 스킵.
     US·KR 둘 다 비면 전송도 스킵.
@@ -385,7 +398,12 @@ def run_morning_brief():
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [BRIEF] 모닝 브리핑 시작")
     try:
         us_tickers, kr_tickers = _split_portfolio()
-        sections: list[str] = []
+        sections: list[list[str]] = []
+        blocks_for_llm: list[dict] = []
+
+        cutoff      = datetime.today() - timedelta(days=_BRIEF_LOOKBACK_DAYS)
+        sec_since   = cutoff.strftime("%Y-%m-%d")  # SEC filed_date 포맷
+        dart_since  = cutoff.strftime("%Y%m%d")    # DART rcept_dt 포맷
 
         # ── 미국 섹션 ─────────────────────────────────────────────────
         if us_tickers:
@@ -393,34 +411,68 @@ def run_morning_brief():
             if kis.login():
                 kis.run_daily_update(us_tickers)
             sec = SECCollector()
-            sec.fetch_all_tickers(us_tickers, days_back=3)
+            sec.fetch_all_tickers(us_tickers, days_back=_BRIEF_LOOKBACK_DAYS)
 
-            us_lines = ["🇺🇸 미국 포트폴리오"]
+            us_lines = [f"🇺🇸 미국 포트폴리오 (최근 {_BRIEF_LOOKBACK_DAYS}일)"]
             for t in us_tickers:
                 name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
-                summary = sec.get_filing_summary(t, limit=5)
+                summary = sec.get_filing_summary(
+                    t, limit=_BRIEF_SUMMARY_LIMIT, since_date=sec_since
+                )
                 us_lines.append(f"─── {name}({t}) ───\n{summary}")
-            sections.append("\n".join(us_lines))
+                items = _format_summary_lines(summary)
+                blocks_for_llm.append({
+                    "ticker": t, "name": name, "market": "US", "items": items,
+                })
+            sections.append(us_lines)
 
-        # ── 한국 DART T-1 섹션 ────────────────────────────────────────
+        # ── 한국 DART 섹션 ────────────────────────────────────────────
         if kr_tickers:
             dart = DartCollector()
-            dart.fetch_all_tickers(kr_tickers, days_back=3)
+            dart.fetch_all_tickers(kr_tickers, days_back=_BRIEF_LOOKBACK_DAYS)
 
-            kr_lines = ["🇰🇷 한국 DART T-1 공시"]
+            kr_lines = [f"🇰🇷 한국 DART 공시 (최근 {_BRIEF_LOOKBACK_DAYS}일)"]
             for t in kr_tickers:
                 name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
-                summary = dart.get_disclosure_summary(t, limit=5)
+                summary = dart.get_disclosure_summary(
+                    t, limit=_BRIEF_SUMMARY_LIMIT, since_date=dart_since
+                )
                 kr_lines.append(f"─── {name}({t}) ───\n{summary}")
-            sections.append("\n".join(kr_lines))
+                items = _format_summary_lines(summary)
+                blocks_for_llm.append({
+                    "ticker": t, "name": name, "market": "KR", "items": items,
+                })
+            sections.append(kr_lines)
 
         if not sections:
             print("[BRIEF] 대상 포트폴리오 없음 — 스킵")
             return
 
+        # ── LLM 요약 (공시 있는 종목에 한해 종목당 한 줄) ─────────────
+        ticker_summary: dict[str, str] = {}
+        if any(b["items"] for b in blocks_for_llm):
+            ticker_summary = StockAnalyzer().summarize_disclosures(blocks_for_llm)
+
+        # ── 섹션 렌더링: LLM 요약을 각 종목 블록 아래 삽입 ────────────
+        import re
+        rendered_sections: list[str] = []
+        for lines in sections:
+            out = [lines[0]]  # 섹션 헤더 ("🇺🇸 ..." / "🇰🇷 ...")
+            for block in lines[1:]:
+                out.append(block)
+                # block = "─── NAME(TICKER) ───\n<요약>"
+                head = block.split("\n", 1)[0]
+                m = re.search(r"\(([^()]+)\)", head)
+                ticker = m.group(1) if m else ""
+                if ticker in ticker_summary:
+                    out.append(f"💡 {ticker_summary[ticker]}")
+            rendered_sections.append("\n".join(out))
+
         header = (f"[BRIEF] 모닝 브리핑 | "
                   f"{datetime.now().strftime('%m/%d %H:%M')}")
-        TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID).send("\n\n".join([header] + sections))
+        TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID).send(
+            "\n\n".join([header] + rendered_sections)
+        )
         print("[OK] 모닝 브리핑 완료")
     except Exception as e:
         _notify_batch_error("모닝 브리핑", e)
