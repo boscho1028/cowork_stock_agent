@@ -61,9 +61,9 @@ MA_COLORS = {
 
 # 인터벌별 기본값
 _DEFAULTS = {
-    "D": {"n": 80,  "cfg_key": "ma_periods",         "label": "일봉", "ichi": True, "future": True, "chikou": True},
-    "W": {"n": 78,  "cfg_key": "ma_periods_weekly",   "label": "주봉", "ichi": True, "future": True, "chikou": True},
-    "M": {"n": 36,  "cfg_key": "ma_periods_monthly",  "label": "월봉", "ichi": True, "future": True, "chikou": True},
+    "D": {"n": 80,  "cfg_key": "ma_periods",         "label": "일봉", "ichi": True,  "future": True,  "chikou": True},
+    "W": {"n": 78,  "cfg_key": "ma_periods_weekly",   "label": "주봉", "ichi": False, "future": False, "chikou": False},
+    "M": {"n": 36,  "cfg_key": "ma_periods_monthly",  "label": "월봉", "ichi": False, "future": False, "chikou": False},
 }
 
 
