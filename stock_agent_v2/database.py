@@ -181,6 +181,19 @@ def init_db():
             company    TEXT,
             updated_at TEXT DEFAULT (datetime('now','localtime'))
         );
+
+        -- ── 투자자별 매매동향 (외국인·기관, KIS inquire-investor) ──
+        -- foreign_amt / inst_amt: 순매수 거래대금 (KIS raw, 백만원 단위)
+        CREATE TABLE IF NOT EXISTS investor_trend (
+            ticker      TEXT NOT NULL,
+            trade_date  TEXT NOT NULL,          -- YYYY-MM-DD
+            foreign_amt INTEGER,
+            inst_amt    INTEGER,
+            created_at  TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (ticker, trade_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_investor_ticker_date
+            ON investor_trend(ticker, trade_date DESC);
         """)
         conn.commit()
         # 스키마 생성분을 클라우드로 push
@@ -369,6 +382,39 @@ def load_latest_report(ticker: str):
         cols = [d[0] for d in cur.description]
         row  = cur.fetchone()
     return dict(zip(cols, row)) if row else None
+
+
+# ── 투자자 매매동향 CRUD ─────────────────────────────────────────────
+
+def upsert_investor_trend(rows: list) -> int:
+    """
+    rows: [(ticker, trade_date, foreign_amt, inst_amt), ...]
+    trade_date 포맷 'YYYY-MM-DD'. 기본키 (ticker, trade_date) 충돌 시 덮어씀.
+    """
+    if not rows:
+        return 0
+    with get_conn(sync_after=True) as conn:
+        conn.executemany("""
+            INSERT OR REPLACE INTO investor_trend
+                (ticker, trade_date, foreign_amt, inst_amt)
+            VALUES (?,?,?,?)
+        """, rows)
+    return len(rows)
+
+
+def load_investor_trend(ticker: str, days: int = 30) -> list:
+    """해당 ticker 최신 N영업일 행. [{trade_date, foreign_amt, inst_amt}, ...]
+    최신일자부터 역순."""
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT trade_date, foreign_amt, inst_amt
+            FROM   investor_trend
+            WHERE  ticker=?
+            ORDER  BY trade_date DESC
+            LIMIT  ?
+        """, (ticker, int(days)))
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 # ── 분석 로그 ────────────────────────────────────────────────────────

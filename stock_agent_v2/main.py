@@ -513,9 +513,72 @@ def run_morning_brief():
         _notify_batch_error("모닝 브리핑", e)
 
 
+def _fmt_amt_mkrw(v_mil_krw: int) -> str:
+    """백만원 단위 순매수 정수 → '+123억' / '-4.5조' 처럼 읽기 편하게."""
+    if v_mil_krw == 0:
+        return "±0"
+    sign = "+" if v_mil_krw > 0 else "-"
+    a    = abs(v_mil_krw)
+    # 백만원 → 억(1억=100백만) / 조(1조=1,000,000백만)
+    if a >= 1_000_000:
+        return f"{sign}{a/1_000_000:.1f}조"
+    if a >= 100:
+        return f"{sign}{a/100:.0f}억"
+    return f"{sign}{a}백만"
+
+
+def _build_supply_summary(kr_tickers: list) -> str:
+    """portfolio 국내 종목별 외국인·기관 수급 요약 (저녁 분석 헤더용).
+    DB 에 데이터 없는 종목은 스킵. 반환: 멀티라인 문자열.
+
+    종목당 2줄:
+      첫줄  — 당일(최신 확정일) 외국인·기관 순매수
+      둘째줄 — 5일/20일 누계 + 방향전환 플래그
+    """
+    from database import load_investor_trend
+    lines = ["🌏 수급 동향 (외국인·기관 순매수)"]
+    had_data = False
+    for t in kr_tickers:
+        rows = load_investor_trend(t, days=20)
+        if not rows:
+            continue
+        had_data = True
+        # rows: DESC 정렬 (최신 먼저)
+        today    = rows[0]
+        today_f  = today.get("foreign_amt") or 0
+        today_i  = today.get("inst_amt")    or 0
+        today_dt = today.get("trade_date", "")[-5:].replace("-", "/")  # MM/DD
+
+        f5  = sum((r.get("foreign_amt") or 0) for r in rows[:5])
+        f20 = sum((r.get("foreign_amt") or 0) for r in rows[:20])
+        i5  = sum((r.get("inst_amt")    or 0) for r in rows[:5])
+        i20 = sum((r.get("inst_amt")    or 0) for r in rows[:20])
+
+        # 방향 전환: 직전 5일 평균 sign vs 오늘 sign
+        flip = ""
+        if len(rows) >= 6:
+            prev5_f = sum((r.get("foreign_amt") or 0) for r in rows[1:6]) / 5
+            if today_f != 0 and prev5_f != 0 and (today_f > 0) != (prev5_f > 0):
+                flip = " · 외국인 방향전환"
+            prev5_i = sum((r.get("inst_amt") or 0) for r in rows[1:6]) / 5
+            if today_i != 0 and prev5_i != 0 and (today_i > 0) != (prev5_i > 0):
+                flip += " · 기관 방향전환"
+
+        name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
+        lines.append(
+            f"· {t} {name}\n"
+            f"  {today_dt} 외국인 {_fmt_amt_mkrw(today_f)}"
+            f" · 기관 {_fmt_amt_mkrw(today_i)}\n"
+            f"  5d 외 {_fmt_amt_mkrw(f5)}/기 {_fmt_amt_mkrw(i5)}"
+            f"  |  20d 외 {_fmt_amt_mkrw(f20)}/기 {_fmt_amt_mkrw(i20)}{flip}"
+        )
+    return "\n".join(lines) if had_data else ""
+
+
 def run_kr_evening():
     """월~금 17:00 — 한국 장 마감 후 국내 포트폴리오 가격·공시 업데이트 +
-    AI 분석(Claude/Gemini) + 차트 전송. 국내 포트폴리오가 비면 조용히 스킵.
+    universe 전체 외국인·기관 수급 수집 + portfolio AI 분석 + 차트 전송.
+    국내 포트폴리오가 비면 조용히 스킵.
     """
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 한국 저녁 분석 시작")
     try:
@@ -524,12 +587,21 @@ def run_kr_evening():
             print("[REPORT] 국내 포트폴리오 없음 — 스킵")
             return
         cmd_update(kr_tickers)
-        cmd_analyze(
-            tickers=kr_tickers,
-            header=f"[REPORT] AI 주식 전략 | "
-                   f"{datetime.now().strftime('%m/%d')} "
-                   f"{config.EVENING_ANALYZE_TIME}",
-        )
+
+        # universe 전체 외국인·기관 매매동향 (≈67종목 × 1초 ≈ 2분)
+        from investor_collector import InvestorCollector
+        universe_kr = [t for t in config.UNIVERSE
+                       if not config.is_overseas(t)]
+        InvestorCollector().fetch_all_tickers(universe_kr)
+
+        supply = _build_supply_summary(kr_tickers)
+        header = (f"[REPORT] AI 주식 전략 | "
+                  f"{datetime.now().strftime('%m/%d')} "
+                  f"{config.EVENING_ANALYZE_TIME}")
+        if supply:
+            header = f"{header}\n\n{supply}"
+
+        cmd_analyze(tickers=kr_tickers, header=header)
     except Exception as e:
         _notify_batch_error("한국 저녁 분석", e)
 
