@@ -561,7 +561,10 @@ def _build_supply_summary(kr_tickers: list) -> str:
                 parts.append(f"{dt} {_fmt_amt_mkrw(r.get(field) or 0)}")
             return "  ".join(parts)
 
-        name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
+        info = (config.get_portfolio_detail().get(t)
+             or config.get_universe_detail().get(t)
+             or {})
+        name = info.get("name", t)
         lines.append(
             f"· {t} {name}\n"
             f"  외국인  {_daily('foreign_amt')}  | 한달 {_fmt_amt_mkrw(f20)}\n"

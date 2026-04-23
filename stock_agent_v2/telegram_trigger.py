@@ -287,6 +287,28 @@ def handle_command(chat_id: int, text: str, user_name: str):
     elif cmd in ("/dart", "/공시"):
         run_script(chat_id, "run_dart.py", task_name="공시확인")
 
+    # 외국인·기관 수급 동향 (DB 읽기 · 저녁 배치가 일 1회 갱신)
+    elif cmd in ("/supply", "/수급"):
+        from main import _build_supply_summary, _split_portfolio
+        if not args:
+            _, kr = _split_portfolio()
+            if not kr:
+                send_message(chat_id, "[수급] 국내 포트폴리오 없음")
+                return
+            out = _build_supply_summary(kr)
+            send_message(chat_id, out or "[수급] 데이터 없음")
+        else:
+            ticker = args[0].upper()
+            out = _build_supply_summary([ticker])
+            if out:
+                send_message(chat_id, out)
+            else:
+                send_message(chat_id,
+                    f"[수급] {ticker} 매매동향 데이터 없음\n"
+                    "universe 등록된 국내 종목만 수집됩니다.\n"
+                    "· portfolio/universe 밖 종목이면 /watch 로 추가 후 저녁 배치(17:00) 이후 조회\n"
+                    "· 해외 종목(US 등)은 수집 대상 아님")
+
     # universe 전체 업데이트 (분석·전송 없음)
     elif cmd in ("/update", "/업데이트"):
         send_message(chat_id,
@@ -497,6 +519,10 @@ def handle_command(chat_id: int, text: str, user_name: str):
             "   예) /single NVDA\n\n"
             "[START] /dart\n"
             "   DART + SEC 공시 확인\n\n"
+            "[START] /supply [종목]\n"
+            "   외국인·기관 매매동향 (최근 3영업일 + 한달)\n"
+            "   · 인자 없음: 국내 포트폴리오 전체\n"
+            "   · 종목코드: 해당 종목만 (예: /supply 005930)\n\n"
             "[START] /update\n"
             "   universe 전체 가격 업데이트\n"
             "   (분석·전송 없음, 10~20분 소요)\n\n"
@@ -540,6 +566,7 @@ BOT_COMMANDS = [
     ("single",    "단일 종목 즉시 분석 (/single 005930)"),
     ("signals",   "시그널 스캔 (/signals [portfolio|종목])"),
     ("dart",      "DART/SEC 공시 확인"),
+    ("supply",    "외국인·기관 매매동향 (/supply [종목])"),
     ("update",    "universe 전체 가격 업데이트"),
     ("weekly",    "주간 전략 리포트"),
     ("portfolio", "보유 종목 목록"),
