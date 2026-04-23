@@ -447,12 +447,13 @@ class StockAnalyzer:
     # ── 공시 요약 (모닝 브리핑용) ────────────────────────────────────
     def summarize_disclosures(self, blocks: list) -> dict:
         """
-        공시 목록을 LLM 으로 한번에 요약. 본문은 조회하지 않고 제목·날짜·
-        중요도만으로 투자자 관점 해석을 만든다.
+        공시 목록을 LLM 으로 한번에 요약. 중요 공시에는 뉴스 기사(제목+
+        스니펫) 가 함께 주어지므로 구체 수치·배경까지 반영한다.
 
         blocks: [{"ticker": str, "name": str, "market": "KR"|"US",
-                  "items": list[str]}, ...]
-            items 는 이미 포맷된 한 줄들 (예: "🟡 2026-04-22  주요사항보고서(...)").
+                  "items": list[str],
+                  "news": list[dict] (선택: title/description/link)},
+                 ...]
         반환: {ticker: 한 줄 요약} — items 비어있던 종목은 제외.
         """
         filled = [b for b in blocks if b.get("items")]
@@ -463,21 +464,33 @@ class StockAnalyzer:
         for b in filled:
             flag = "🇺🇸" if b["market"] == "US" else "🇰🇷"
             lines.append(f"[{b['ticker']} | {b['name']} {flag}]")
-            lines.extend(b["items"])
+            lines.append("공시:")
+            lines.extend(f"  {it}" for it in b["items"])
+            news = b.get("news") or []
+            if news:
+                lines.append("관련 뉴스:")
+                for n in news:
+                    t = n.get("title", "").strip()
+                    d = n.get("description", "").strip()
+                    if t:
+                        lines.append(f"  - {t}")
+                    if d:
+                        lines.append(f"    {d[:200]}")
             lines.append("")
         listing = "\n".join(lines).strip()
 
         prompt = (
-            "아래는 포트폴리오 종목의 최근 공시 목록이다. 각 종목에 대해 "
-            "공시 제목·날짜·중요도(🔴>🟠>🟡>🔵)만으로 판단해서 투자자 관점 "
-            "핵심을 **한 줄(최대 2문장)** 로 요약하라. 본문 수치가 필요하면 "
-            "'본문 확인 필요' 로 명시. 추측·과장·투자권유는 금지.\n\n"
-            "응답 형식 (엄격히 지킬 것):\n"
+            "아래는 포트폴리오 종목의 최근 공시 목록과 관련 뉴스다. 각 종목에 "
+            "대해 **한 줄(최대 2문장)** 로 요약하라. 뉴스 스니펫에 구체 수치/"
+            "배경이 있으면 반영하고, 없으면 공시 제목·중요도(🔴>🟠>🟡>🔵) 만으로 "
+            "판단. 본문 수치가 필요하면 '본문 확인 필요' 명시. 뉴스가 공시와 "
+            "무관해 보이면 무시. 추측·과장·투자권유 금지.\n\n"
+            "응답 형식 (엄격):\n"
             "TICKER | 요약문\n"
             "TICKER | 요약문\n"
             "...\n"
             "종목당 정확히 한 줄. 파이프(|) 앞뒤 공백 1칸.\n\n"
-            "공시 목록:\n"
+            "입력:\n"
             f"{listing}"
         )
 

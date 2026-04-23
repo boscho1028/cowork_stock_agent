@@ -387,6 +387,31 @@ def _format_summary_lines(raw: str) -> list[str]:
     return [ln for ln in raw.splitlines() if ln.strip()]
 
 
+def _fetch_news_for_block(name: str, items: list[str], max_per_disclosure: int = 2) -> list[dict]:
+    """중요도 🔴/🟠 이거나 주요 키워드(실적·배당·자사주 등)인 공시에 한해
+    네이버 뉴스를 검색해 돌려준다. 종목당 중복 제거해 평탄화."""
+    import naver_news
+    seen_links: set = set()
+    collected: list[dict] = []
+    for line in items:
+        if not naver_news.should_fetch_news(line):
+            continue
+        # line 예: "🟡 2026-04-23  연결재무제표기준영업(잠정)실적(공정공시)"
+        # 제목부: 날짜 뒤 부분
+        parts = line.split(None, 2)
+        title = parts[-1] if len(parts) >= 3 else line
+        q = naver_news.query_for(name, title)
+        hits = naver_news.search(q, display=max_per_disclosure, sort="date")
+        for h in hits:
+            if h["link"] in seen_links:
+                continue
+            seen_links.add(h["link"])
+            collected.append(h)
+            if len(collected) >= 4:   # 종목당 상한 (텔레그램 4096자 대비)
+                return collected
+    return collected
+
+
 def run_morning_brief():
     """월~금 07:30 — 미국 포트폴리오 가격·SEC 공시 업데이트 + 한국 DART
     공시 수집 → 당일+T-3 캘린더일치 공시를 규칙 기반 목록 + LLM 한줄 요약
@@ -421,8 +446,10 @@ def run_morning_brief():
                 )
                 us_lines.append(f"─── {name}({t}) ───\n{summary}")
                 items = _format_summary_lines(summary)
+                # SEC 공시는 영문·티커 기반이라 네이버 뉴스 매칭 효과 낮음 → 스킵
                 blocks_for_llm.append({
-                    "ticker": t, "name": name, "market": "US", "items": items,
+                    "ticker": t, "name": name, "market": "US",
+                    "items": items, "news": [],
                 })
             sections.append(us_lines)
 
@@ -439,8 +466,10 @@ def run_morning_brief():
                 )
                 kr_lines.append(f"─── {name}({t}) ───\n{summary}")
                 items = _format_summary_lines(summary)
+                news = _fetch_news_for_block(name, items) if items else []
                 blocks_for_llm.append({
-                    "ticker": t, "name": name, "market": "KR", "items": items,
+                    "ticker": t, "name": name, "market": "KR",
+                    "items": items, "news": news,
                 })
             sections.append(kr_lines)
 
@@ -453,8 +482,9 @@ def run_morning_brief():
         if any(b["items"] for b in blocks_for_llm):
             ticker_summary = StockAnalyzer().summarize_disclosures(blocks_for_llm)
 
-        # ── 섹션 렌더링: LLM 요약을 각 종목 블록 아래 삽입 ────────────
+        # ── 섹션 렌더링: LLM 요약 + 뉴스 링크를 각 종목 블록 아래 삽입 ─
         import re
+        news_by_ticker = {b["ticker"]: b.get("news") or [] for b in blocks_for_llm}
         rendered_sections: list[str] = []
         for lines in sections:
             out = [lines[0]]  # 섹션 헤더 ("🇺🇸 ..." / "🇰🇷 ...")
@@ -466,6 +496,11 @@ def run_morning_brief():
                 ticker = m.group(1) if m else ""
                 if ticker in ticker_summary:
                     out.append(f"💡 {ticker_summary[ticker]}")
+                for n in news_by_ticker.get(ticker, [])[:2]:
+                    t = n.get("title", "").strip()
+                    l = n.get("link", "")
+                    if t and l:
+                        out.append(f"📰 {t}\n   {l}")
             rendered_sections.append("\n".join(out))
 
         header = (f"[BRIEF] 모닝 브리핑 | "

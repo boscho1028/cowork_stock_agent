@@ -34,6 +34,12 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID",   "")
 # ── DART ─────────────────────────────────────────────────────────────
 DART_API_KEY = os.getenv("DART_API_KEY", "")
 
+# ── 네이버 뉴스 (모닝 브리핑 공시 보강) ──────────────────────────────
+# https://developers.naver.com — 검색 API (25,000 req/day 무료)
+# 값 미설정 시 모닝 브리핑은 뉴스 보강 없이 동작 (graceful degrade)
+NAVER_CLIENT_ID     = os.getenv("NAVER_CLIENT_ID",     "")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+
 # ── KIS API ──────────────────────────────────────────────────────────
 KIS_APP_KEY       = os.getenv("KIS_APP_KEY",       "")
 KIS_APP_SECRET    = os.getenv("KIS_APP_SECRET",    "")
