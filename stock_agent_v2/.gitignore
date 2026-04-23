@@ -12,10 +12,8 @@ venv_kis/
 venv/
 .venv/
 
-# 로컬 데이터
-data/*.db
-data/*.db-shm
-data/*.db-wal
+# 로컬 데이터 (Turso embedded replica DB, DART corp_code 캐시 등)
+data/
 
 # 테스트 출력
 test_chart_*.png
@@ -28,12 +26,3 @@ logs/
 
 # 개인 보유 정보 (원하면 주석 해제)
 # portfolio.csv
-s t o c k _ a g e n t _ v 2 / d a t a / s t o c k _ a g e n t . d b 
- s t o c k _ a g e n t _ v 2 / d a t a / s t o c k _ a g e n t . d b - s h m 
- s t o c k _ a g e n t _ v 2 / d a t a / s t o c k _ a g e n t . d b - w a l 
- 
- _ _ p y c a c h e _ _ / 
- 
- v e n v _ k i s / 
- 
- 
