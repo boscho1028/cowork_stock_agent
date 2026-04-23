@@ -537,9 +537,10 @@ def _build_supply_summary(kr_tickers: list) -> str:
     """portfolio 국내 종목별 외국인·기관 수급 요약 (저녁 분석 헤더용).
     DB 에 데이터 없는 종목은 스킵. 반환: 멀티라인 문자열.
 
-    종목당 2줄:
-      첫줄  — 당일(최신 확정일) 외국인·기관 순매수
-      둘째줄 — 5일/20일 누계 + 방향전환 플래그
+    종목당 3줄:
+      헤더   — 티커/이름
+      외국인 — 당일 포함 최근 3영업일 일별 + 한달(20영업일) 누계
+      기관   — 당일 포함 최근 3영업일 일별 + 한달(20영업일) 누계
     """
     from database import load_investor_trend
     lines = ["🌏 수급 동향 (외국인·기관 순매수)"]
@@ -549,34 +550,22 @@ def _build_supply_summary(kr_tickers: list) -> str:
         if not rows:
             continue
         had_data = True
-        # rows: DESC 정렬 (최신 먼저)
-        today    = rows[0]
-        today_f  = today.get("foreign_amt") or 0
-        today_i  = today.get("inst_amt")    or 0
-        today_dt = today.get("trade_date", "")[-5:].replace("-", "/")  # MM/DD
-
-        f5  = sum((r.get("foreign_amt") or 0) for r in rows[:5])
-        f20 = sum((r.get("foreign_amt") or 0) for r in rows[:20])
-        i5  = sum((r.get("inst_amt")    or 0) for r in rows[:5])
+        recent3 = rows[:3]                                          # 최신 3영업일 (DESC)
+        f20 = sum((r.get("foreign_amt") or 0) for r in rows[:20])   # 한달 누계
         i20 = sum((r.get("inst_amt")    or 0) for r in rows[:20])
 
-        # 방향 전환: 직전 5일 평균 sign vs 오늘 sign
-        flip = ""
-        if len(rows) >= 6:
-            prev5_f = sum((r.get("foreign_amt") or 0) for r in rows[1:6]) / 5
-            if today_f != 0 and prev5_f != 0 and (today_f > 0) != (prev5_f > 0):
-                flip = " · 외국인 방향전환"
-            prev5_i = sum((r.get("inst_amt") or 0) for r in rows[1:6]) / 5
-            if today_i != 0 and prev5_i != 0 and (today_i > 0) != (prev5_i > 0):
-                flip += " · 기관 방향전환"
+        def _daily(field: str) -> str:
+            parts = []
+            for r in recent3:
+                dt = r.get("trade_date", "")[-5:].replace("-", "/")  # MM/DD
+                parts.append(f"{dt} {_fmt_amt_mkrw(r.get(field) or 0)}")
+            return "  ".join(parts)
 
         name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
         lines.append(
             f"· {t} {name}\n"
-            f"  {today_dt} 외국인 {_fmt_amt_mkrw(today_f)}"
-            f" · 기관 {_fmt_amt_mkrw(today_i)}\n"
-            f"  5d 외 {_fmt_amt_mkrw(f5)}/기 {_fmt_amt_mkrw(i5)}"
-            f"  |  20d 외 {_fmt_amt_mkrw(f20)}/기 {_fmt_amt_mkrw(i20)}{flip}"
+            f"  외국인  {_daily('foreign_amt')}  | 한달 {_fmt_amt_mkrw(f20)}\n"
+            f"  기관    {_daily('inst_amt')}  | 한달 {_fmt_amt_mkrw(i20)}"
         )
     return "\n".join(lines) if had_data else ""
 
