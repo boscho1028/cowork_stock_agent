@@ -5,18 +5,35 @@ dart_collector.py - DART OpenAPI 특별 공시 수집
 API 키 발급: https://opendart.fss.or.kr
 """
 
+import io
+import json
 import time
+import zipfile
 import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
+from pathlib import Path
 from database import upsert_disclosures, upsert_report, load_disclosures
 import config
 
+# stock_code → corp_code 매핑 캐시. DART 는 공시 조회 시 corp_code(8자리 고유번호)
+# 를 요구하는데 종목코드(6자리 stock_code)로부터 역매핑 endpoint 가 없다.
+# 전체 상장사 매핑이 들어 있는 corpCode.xml 을 1회 받아 로컬에 캐시한다.
+_CORP_CODE_CACHE = Path(__file__).parent / "data" / "dart_corp_codes.json"
+_CORP_CODE_TTL_DAYS = 7
 
-# ── 수집 대상 공시 유형 ───────────────────────────────────────────────
-SPECIAL_PBOARD_TYPES = ("D", "A", "B", "C", "K")
-# D: 주요사항보고서  A: 사업보고서  B: 반기  C: 분기  K: 거래소공시
 
-# 중요 키워드 (D/K 유형에만 적용)
+# ── 수집 대상 공시 유형 (DART pblntf_ty 공식 코드) ────────────────────
+#   A: 정기공시   (사업·반기·분기보고서)
+#   B: 주요사항보고 (자사주·배당·M&A·증자 등 대부분 중요)
+#   C: 발행공시   (증권신고서 등)
+#   D: 지분공시   (5%·임원주요주주 등)
+#   I: 거래소공시 (공정공시·잠정실적·주주총회 등)
+# A·B 는 전부 수집, C/D/I 는 키워드 매칭된 것만 (양이 많고 잡다함).
+SPECIAL_PBOARD_TYPES   = ("A", "B", "C", "D", "I")
+_FILTER_REQUIRED_TYPES = ("C", "D", "I")
+
+# 중요 키워드 (C/D/I 유형에만 적용)
 IMPORTANT_KEYWORDS = [
     # 자본 변동
     "유상증자", "무상증자", "전환사채", "신주인수권", "교환사채",
@@ -26,8 +43,10 @@ IMPORTANT_KEYWORDS = [
     # M&A / 구조변경
     "합병", "분할", "영업양수", "영업양도", "주식교환", "주식이전",
     "최대주주 변경", "대표이사 변경",
-    # 실적
-    "잠정실적", "영업이익", "매출액", "실적공시",
+    # 실적 — "(잠정)실적(공정공시)" 같은 괄호 섞인 제목도 "실적" 으로 포괄
+    "실적", "잠정실적", "영업이익", "매출액", "실적공시",
+    # 거래소 공정공시 전반
+    "공정공시",
     # 리스크
     "관리종목", "상장폐지", "영업정지", "불성실공시",
     "횡령", "배임", "소송", "과징금", "제재",
@@ -100,8 +119,8 @@ class DartCollector:
                     # 단순 정정 제외
                     if any(ex in nm for ex in EXCLUDE_KEYWORDS):
                         continue
-                    # D/K 유형은 키워드 필터 적용
-                    if ptype in ("D", "K"):
+                    # C/D/I 유형은 잡다해서 키워드 필터 적용 (A/B 는 통과)
+                    if ptype in _FILTER_REQUIRED_TYPES:
                         if not any(kw in nm for kw in IMPORTANT_KEYWORDS):
                             continue
                     collected.append({
@@ -192,11 +211,55 @@ class DartCollector:
             print(f"  [DART ERROR] {endpoint}: {e}")
             return None
 
+    def _load_corp_code_map(self) -> dict:
+        """corpCode.xml (전체 상장사 매핑) 을 다운로드·파싱해 dict 로 반환.
+        `data/dart_corp_codes.json` 에 7일 TTL 로 캐시한다."""
+        if _CORP_CODE_CACHE.exists():
+            age_days = (time.time() - _CORP_CODE_CACHE.stat().st_mtime) / 86400
+            if age_days < _CORP_CODE_TTL_DAYS:
+                try:
+                    with _CORP_CODE_CACHE.open(encoding="utf-8") as f:
+                        return json.load(f)
+                except Exception as e:
+                    print(f"  [DART] corp_code 캐시 읽기 실패, 재다운로드: {e}")
+
+        print("  [DART] corp_code 매핑 갱신 중 (전체 상장사 XML)…")
+        try:
+            resp = self.sess.get(
+                f"{self.BASE}/corpCode.xml",
+                params={"crtfc_key": self.api_key}, timeout=30,
+            )
+            resp.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                with z.open(z.namelist()[0]) as f:
+                    tree = ET.parse(f)
+        except Exception as e:
+            print(f"  [DART ERROR] corpCode.xml 다운로드 실패: {e}")
+            return {}
+
+        mapping: dict[str, str] = {}
+        for item in tree.getroot().findall("list"):
+            stock = (item.findtext("stock_code") or "").strip()
+            corp  = (item.findtext("corp_code")  or "").strip()
+            if stock and corp:
+                mapping[stock] = corp
+
+        try:
+            _CORP_CODE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _CORP_CODE_CACHE.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(mapping, f, ensure_ascii=False)
+            tmp.replace(_CORP_CODE_CACHE)
+        except Exception as e:
+            print(f"  [DART] corp_code 캐시 저장 실패 (메모리만 사용): {e}")
+
+        print(f"  [DART] {len(mapping)}개 종목 매핑 로드")
+        return mapping
+
     def _get_corp_code(self, ticker: str):
-        resp = self._get("company.json", {"stock_code": ticker})
-        if resp and resp.get("status") == "000":
-            return resp.get("corp_code")
-        return None
+        if not hasattr(self, "_corp_map"):
+            self._corp_map = self._load_corp_code_map()
+        return self._corp_map.get(ticker)
 
     @staticmethod
     def _parse_financials(items: list) -> dict:
