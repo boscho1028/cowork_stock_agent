@@ -509,6 +509,12 @@ def run_morning_brief():
             "\n\n".join([header] + rendered_sections)
         )
         print("[OK] 모닝 브리핑 완료")
+
+        # ── 미국 AI 분석 (장 마감 후 전일 종가 기준, 포트폴리오 US 전종목) ──
+        if us_tickers:
+            us_header = (f"[REPORT] 미국 AI 전략 | "
+                         f"{datetime.now():%m/%d} {config.MORNING_BRIEF_TIME}")
+            cmd_analyze(tickers=us_tickers, header=us_header)
     except Exception as e:
         _notify_batch_error("모닝 브리핑", e)
 
