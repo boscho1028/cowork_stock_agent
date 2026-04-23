@@ -61,7 +61,13 @@ TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "")
 TURSO_AUTH_TOKEN   = os.getenv("TURSO_AUTH_TOKEN",   "")
 
 # ── 스케줄 ───────────────────────────────────────────────────────────
-SCHEDULE_TIME = "08:00"
+# 월~금 2회 배치.
+#   · MORNING_BRIEF_TIME: 미국 포트폴리오 업데이트 + SEC 공시 + 한국 DART T-1
+#     공시를 규칙 기반으로 요약 전송 (AI 호출 없음, 빠름)
+#   · EVENING_ANALYZE_TIME: 한국 장 마감 후 종가·일봉 반영된 뒤
+#     한국 포트폴리오 업데이트 + AI 분석 + 차트 전송
+MORNING_BRIEF_TIME    = os.getenv("MORNING_BRIEF_TIME",    "07:30")
+EVENING_ANALYZE_TIME  = os.getenv("EVENING_ANALYZE_TIME",  "17:00")
 
 # ── 기술적 지표 파라미터 ─────────────────────────────────────────────
 # ── 시그널 규칙 파라미터 ─────────────────────────────────────────────

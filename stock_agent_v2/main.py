@@ -354,26 +354,97 @@ def cmd_weekly_report(primary=None):
 
 # ── 스케줄 래퍼 ───────────────────────────────────────────────────────
 
-def run_daily():
-    """주중 08:00 — portfolio 업데이트 + portfolio 분석 + 채널 전송.
-    universe 전체 업데이트는 Telegram /update 로 수동 실행.
-    예외 발생 시 traceback 을 로그로 남기고 Telegram 으로도 알림.
-    """
+def _split_portfolio() -> tuple[list, list]:
+    """포트폴리오를 (해외, 국내) 티커 리스트로 분리."""
+    detail = config.get_portfolio_detail()
+    us = [t for t, v in detail.items() if v.get("is_overseas")]
+    kr = [t for t, v in detail.items() if not v.get("is_overseas")]
+    return us, kr
+
+
+def _notify_batch_error(label: str, exc: Exception) -> None:
     import traceback
-    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 일일 분석 시작")
+    tb = traceback.format_exc()
+    print(f"\n[ERROR] {label} 실패: {exc}\n{tb}")
     try:
-        cmd_update(list(config.PORTFOLIO))
-        cmd_analyze(header=f"[REPORT] AI 주식 전략 | {datetime.now().strftime('%m/%d')} 08:00")
+        TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID).send_error(
+            f"{label} 실패\n{datetime.now():%Y-%m-%d %H:%M}\n"
+            f"오류: {exc}\n로그: {_LOG_PATH.name}"
+        )
+    except Exception as te:
+        print(f"[ERROR] Telegram 알림도 실패: {te}")
+
+
+def run_morning_brief():
+    """월~금 07:30 — 미국 포트폴리오 가격·SEC 공시 업데이트 + 한국 DART T-1
+    공시 수집 → 규칙 기반 요약 1건으로 전송 (AI 호출 없음).
+
+    미국 포트폴리오가 비어 있으면 해당 섹션은 조용히 스킵.
+    US·KR 둘 다 비면 전송도 스킵.
+    """
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [BRIEF] 모닝 브리핑 시작")
+    try:
+        us_tickers, kr_tickers = _split_portfolio()
+        sections: list[str] = []
+
+        # ── 미국 섹션 ─────────────────────────────────────────────────
+        if us_tickers:
+            kis = KISCollector()
+            if kis.login():
+                kis.run_daily_update(us_tickers)
+            sec = SECCollector()
+            sec.fetch_all_tickers(us_tickers, days_back=3)
+
+            us_lines = ["🇺🇸 미국 포트폴리오"]
+            for t in us_tickers:
+                name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
+                summary = sec.get_filing_summary(t, limit=5)
+                us_lines.append(f"─── {name}({t}) ───\n{summary}")
+            sections.append("\n".join(us_lines))
+
+        # ── 한국 DART T-1 섹션 ────────────────────────────────────────
+        if kr_tickers:
+            dart = DartCollector()
+            dart.fetch_all_tickers(kr_tickers, days_back=3)
+
+            kr_lines = ["🇰🇷 한국 DART T-1 공시"]
+            for t in kr_tickers:
+                name = (config.get_portfolio_detail().get(t) or {}).get("name", t)
+                summary = dart.get_disclosure_summary(t, limit=5)
+                kr_lines.append(f"─── {name}({t}) ───\n{summary}")
+            sections.append("\n".join(kr_lines))
+
+        if not sections:
+            print("[BRIEF] 대상 포트폴리오 없음 — 스킵")
+            return
+
+        header = (f"[BRIEF] 모닝 브리핑 | "
+                  f"{datetime.now().strftime('%m/%d %H:%M')}")
+        TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID).send("\n\n".join([header] + sections))
+        print("[OK] 모닝 브리핑 완료")
     except Exception as e:
-        tb = traceback.format_exc()
-        print(f"\n[ERROR] run_daily 실패: {e}\n{tb}")
-        try:
-            TelegramNotifier().send_error(
-                f"일일 배치 실패\n{datetime.now():%Y-%m-%d %H:%M}\n"
-                f"오류: {e}\n로그: {_LOG_PATH.name}"
-            )
-        except Exception as te:
-            print(f"[ERROR] Telegram 알림도 실패: {te}")
+        _notify_batch_error("모닝 브리핑", e)
+
+
+def run_kr_evening():
+    """월~금 17:00 — 한국 장 마감 후 국내 포트폴리오 가격·공시 업데이트 +
+    AI 분석(Claude/Gemini) + 차트 전송. 국내 포트폴리오가 비면 조용히 스킵.
+    """
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 한국 저녁 분석 시작")
+    try:
+        _, kr_tickers = _split_portfolio()
+        if not kr_tickers:
+            print("[REPORT] 국내 포트폴리오 없음 — 스킵")
+            return
+        cmd_update(kr_tickers)
+        cmd_analyze(
+            tickers=kr_tickers,
+            header=f"[REPORT] AI 주식 전략 | "
+                   f"{datetime.now().strftime('%m/%d')} "
+                   f"{config.EVENING_ANALYZE_TIME}",
+        )
+    except Exception as e:
+        _notify_batch_error("한국 저녁 분석", e)
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────
@@ -407,11 +478,16 @@ if __name__ == "__main__":
     elif "--weekly"    in args: cmd_weekly_report(primary=model_arg)
     elif "--signals"   in args: cmd_signals(tickers)
     else:
-        # 스케줄 모드: 주중(월~금) 08:00 단 1회
-        print(f"스케줄 모드 | 주중(월~금) {config.SCHEDULE_TIME} 자동 실행")
+        # 스케줄 모드: 주중(월~금) 2회
+        #   · MORNING_BRIEF_TIME  — 미국 업데이트 + 한국 DART 공시 요약
+        #   · EVENING_ANALYZE_TIME — 한국 포트폴리오 업데이트 + AI 분석
+        print(f"스케줄 모드 | 주중(월~금) "
+              f"{config.MORNING_BRIEF_TIME} 모닝브리핑, "
+              f"{config.EVENING_ANALYZE_TIME} 저녁분석")
         print("Ctrl+C 로 종료\n")
         for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
-            getattr(schedule.every(), day).at(config.SCHEDULE_TIME).do(run_daily)
+            getattr(schedule.every(), day).at(config.MORNING_BRIEF_TIME).do(run_morning_brief)
+            getattr(schedule.every(), day).at(config.EVENING_ANALYZE_TIME).do(run_kr_evening)
         while True:
             schedule.run_pending()
             time.sleep(30)
