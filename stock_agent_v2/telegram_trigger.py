@@ -9,8 +9,10 @@ telegram_trigger.py - 텔레그램 봇 명령어로 분석 트리거
   /signals      universe 시그널 스캔 (규칙 기반, 빠름)
   /dart         DART/SEC 공시만 확인
   /weekly       주간 리포트
-  /add          포트폴리오 종목 추가 (/add 종목 이름 거래소 수량)
+  /add          포트폴리오 추가, universe 자동 포함 (/add 종목 이름 거래소 수량)
+  /remove       포트폴리오에서 제거, universe 유지 (/remove 종목)
   /watch        universe 관찰 종목 추가 (/watch 종목 이름 거래소)
+  /unwatch      universe 에서 제거, portfolio 에 있으면 차단 (/unwatch 종목)
   /status       현재 실행 상태 확인
   /portfolio    보유 종목 목록
   /help         도움말
@@ -183,6 +185,51 @@ def _append_csv_row(path: Path, header: list, row: dict) -> tuple:
     return True, False
 
 
+def _remove_csv_row(path: Path, ticker: str) -> dict | None:
+    """
+    CSV 에서 ticker 행 삭제. 삭제된 행(dict) 반환, 없으면 None.
+    헤더와 나머지 행 유지하며 원자적 재작성 (.tmp → rename).
+    """
+    import csv
+    if not path.exists():
+        return None
+
+    ticker_u = ticker.upper()
+    removed  = None
+    kept     = []
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        header = reader.fieldnames or []
+        for r in reader:
+            if (r.get("ticker", "") or "").strip().upper() == ticker_u:
+                removed = r
+            else:
+                kept.append(r)
+
+    if removed is None:
+        return None
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        w.writerows(kept)
+    tmp.replace(path)
+    return removed
+
+
+def _csv_contains_ticker(path: Path, ticker: str) -> bool:
+    import csv
+    if not path.exists():
+        return False
+    ticker_u = ticker.upper()
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            if (r.get("ticker", "") or "").strip().upper() == ticker_u:
+                return True
+    return False
+
+
 # ── 명령어 처리 ───────────────────────────────────────────────────────
 
 def handle_command(chat_id: int, text: str, user_name: str):
@@ -272,19 +319,28 @@ def handle_command(chat_id: int, text: str, user_name: str):
             send_message(chat_id, f"[ERROR] 수량은 정수여야 합니다: {qty_raw}")
             return
         try:
-            created, exists = _append_csv_row(
+            _, pf_exists = _append_csv_row(
                 BASE_DIR / "portfolio.csv",
                 header=["ticker", "name", "quantity", "exchange"],
                 row={"ticker": ticker, "name": name, "quantity": qty, "exchange": exchange},
             )
-            if exists:
+            # portfolio ⊂ universe 불변식: universe 에도 자동 추가
+            _, uv_exists = _append_csv_row(
+                BASE_DIR / "universe.csv",
+                header=["ticker", "name", "exchange"],
+                row={"ticker": ticker, "name": name, "exchange": exchange},
+            )
+            uv_note = "universe 에 이미 존재" if uv_exists else "universe 에도 자동 추가"
+            if pf_exists:
                 send_message(chat_id,
                     f"[WARN] {ticker} 는 이미 portfolio.csv 에 있습니다.\n"
+                    f"({uv_note})\n"
                     f"수정이 필요하면 CSV 를 직접 편집하세요.")
             else:
                 send_message(chat_id,
                     f"[OK] portfolio 추가 완료\n"
-                    f"  {ticker}  {name}  {exchange}  {qty}주\n\n"
+                    f"  {ticker}  {name}  {exchange}  {qty}주\n"
+                    f"  ({uv_note})\n\n"
                     f"다음 /analyze 시 자동으로 데이터 수집·분석됩니다.")
         except Exception as e:
             send_message(chat_id, f"[ERROR] 추가 실패: {e}")
@@ -308,7 +364,7 @@ def handle_command(chat_id: int, text: str, user_name: str):
                 f"유효한 값: {' '.join(sorted(VALID_EXCHANGES))}")
             return
         try:
-            created, exists = _append_csv_row(
+            _, exists = _append_csv_row(
                 BASE_DIR / "universe.csv",
                 header=["ticker", "name", "exchange"],
                 row={"ticker": ticker, "name": name, "exchange": exchange},
@@ -323,6 +379,58 @@ def handle_command(chat_id: int, text: str, user_name: str):
                     f"다음 /update 또는 /signals 시 데이터 수집됩니다.")
         except Exception as e:
             send_message(chat_id, f"[ERROR] 추가 실패: {e}")
+
+    # 포트폴리오 종목 제거 (portfolio.csv)
+    elif cmd in ("/remove", "/삭제"):
+        if not args:
+            send_message(chat_id,
+                "[사용법] /remove 종목코드\n\n"
+                "예) /remove 005930\n"
+                "예) /remove NVDA\n\n"
+                "※ universe 에서도 빼려면 이후 /unwatch 종목코드")
+            return
+        ticker = args[0].upper()
+        try:
+            removed = _remove_csv_row(BASE_DIR / "portfolio.csv", ticker)
+            if not removed:
+                send_message(chat_id, f"[WARN] {ticker} 는 portfolio.csv 에 없습니다.")
+            else:
+                still_watched = _csv_contains_ticker(BASE_DIR / "universe.csv", ticker)
+                uv_note = "universe 에는 남아있음 (관찰 계속)" if still_watched \
+                          else "universe 에도 없음"
+                send_message(chat_id,
+                    f"[OK] portfolio 제거 완료\n"
+                    f"  {ticker}  {removed.get('name','')}  "
+                    f"{removed.get('exchange','')}  {removed.get('quantity','')}주\n"
+                    f"  ({uv_note})")
+        except Exception as e:
+            send_message(chat_id, f"[ERROR] 제거 실패: {e}")
+
+    # universe 관찰 종목 제거 (universe.csv)
+    elif cmd in ("/unwatch", "/관찰해제"):
+        if not args:
+            send_message(chat_id,
+                "[사용법] /unwatch 종목코드\n\n"
+                "예) /unwatch 035720\n"
+                "예) /unwatch TSLA")
+            return
+        ticker = args[0].upper()
+        try:
+            # 포트폴리오에 있으면 먼저 경고·중단 (portfolio ⊂ universe 불변식)
+            if _csv_contains_ticker(BASE_DIR / "portfolio.csv", ticker):
+                send_message(chat_id,
+                    f"[BLOCK] {ticker} 는 portfolio.csv 에 있어 universe 에서 뺄 수 없습니다.\n"
+                    f"먼저 /remove {ticker} 로 portfolio 에서 제거하세요.")
+                return
+            removed = _remove_csv_row(BASE_DIR / "universe.csv", ticker)
+            if not removed:
+                send_message(chat_id, f"[WARN] {ticker} 는 universe.csv 에 없습니다.")
+            else:
+                send_message(chat_id,
+                    f"[OK] universe 제거 완료\n"
+                    f"  {ticker}  {removed.get('name','')}  {removed.get('exchange','')}")
+        except Exception as e:
+            send_message(chat_id, f"[ERROR] 제거 실패: {e}")
 
     # 시그널 스캔
     #  /signals             → universe 전체
@@ -393,11 +501,17 @@ def handle_command(chat_id: int, text: str, user_name: str):
             "   universe 전체 가격 업데이트\n"
             "   (분석·전송 없음, 10~20분 소요)\n\n"
             "[START] /add 종목 이름 거래소 수량\n"
-            "   포트폴리오 종목 추가\n"
+            "   포트폴리오 추가 (universe 자동 포함)\n"
             "   예) /add 005930 삼성전자 KRX 100\n\n"
+            "[START] /remove 종목\n"
+            "   포트폴리오에서 제거 (universe 유지)\n"
+            "   예) /remove 005930\n\n"
             "[START] /watch 종목 이름 거래소\n"
             "   universe 관찰 종목 추가\n"
             "   예) /watch TSLA Tesla NASDAQ\n\n"
+            "[START] /unwatch 종목\n"
+            "   universe 에서 제거 (portfolio 에 있으면 차단)\n"
+            "   예) /unwatch TSLA\n\n"
             "[START] /signals [대상]\n"
             "   시그널 스캔 (업데이트 + 규칙 기반)\n"
             "   · 인자 없음    : universe 전체\n"
@@ -420,6 +534,41 @@ def handle_command(chat_id: int, text: str, user_name: str):
 
 # ── 메인 루프 ─────────────────────────────────────────────────────────
 
+# Telegram "/" 자동완성 메뉴에 노출할 명령어 (setMyCommands)
+BOT_COMMANDS = [
+    ("analyze",   "전체 포트폴리오 분석"),
+    ("single",    "단일 종목 즉시 분석 (/single 005930)"),
+    ("signals",   "시그널 스캔 (/signals [portfolio|종목])"),
+    ("dart",      "DART/SEC 공시 확인"),
+    ("update",    "universe 전체 가격 업데이트"),
+    ("weekly",    "주간 전략 리포트"),
+    ("portfolio", "보유 종목 목록"),
+    ("add",       "포트폴리오 추가 (/add 종목 이름 거래소 수량)"),
+    ("remove",    "포트폴리오에서 제거 (/remove 종목)"),
+    ("watch",     "universe 관찰 추가 (/watch 종목 이름 거래소)"),
+    ("unwatch",   "universe 에서 제거 (/unwatch 종목)"),
+    ("status",    "현재 실행 상태"),
+    ("help",      "도움말"),
+]
+
+
+def _register_bot_commands():
+    """setMyCommands 로 텔레그램 슬래시 메뉴를 최신 명령어 목록으로 갱신."""
+    try:
+        resp = requests.post(
+            f"{API_URL}/setMyCommands",
+            json={"commands": [{"command": c, "description": d}
+                               for c, d in BOT_COMMANDS]},
+            timeout=10,
+        )
+        if resp.json().get("ok"):
+            print(f"  명령어 메뉴: {len(BOT_COMMANDS)}개 등록 완료")
+        else:
+            print(f"  [WARN] setMyCommands 응답: {resp.text[:200]}")
+    except Exception as e:
+        print(f"  [WARN] 명령어 메뉴 등록 실패 (봇은 계속 동작): {e}")
+
+
 def main():
     if not BOT_TOKEN:
         print("[ERROR] TELEGRAM_BOT_TOKEN 이 설정되지 않았습니다.")
@@ -436,9 +585,12 @@ def main():
     try:
         me       = requests.get(f"{API_URL}/getMe", timeout=5).json()
         bot_name = me.get("result", {}).get("username", "unknown")
-        print(f"  봇: @{bot_name}\n")
+        print(f"  봇: @{bot_name}")
     except Exception:
         pass
+
+    _register_bot_commands()
+    print()
 
     offset = 0
     while True:
