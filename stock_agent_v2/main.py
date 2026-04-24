@@ -539,8 +539,9 @@ def _build_supply_summary(kr_tickers: list) -> str:
 
     종목당 3줄:
       헤더   — 티커/이름
-      외국인 — 당일 포함 최근 3영업일 일별 + 한달(20영업일) 누계
-      기관   — 당일 포함 최근 3영업일 일별 + 한달(20영업일) 누계
+      외국인 — 1D / 3D / 1W / 1M 기간별 순매수 누계
+      기관   — 1D / 3D / 1W / 1M 기간별 순매수 누계
+    (영업일 기준: 1D=당일, 3D=3영업일, 1W=5영업일, 1M=20영업일)
     """
     from database import load_investor_trend
     lines = ["🌏 수급 동향 (외국인·기관 순매수)"]
@@ -550,16 +551,15 @@ def _build_supply_summary(kr_tickers: list) -> str:
         if not rows:
             continue
         had_data = True
-        recent3 = rows[:3]                                          # 최신 3영업일 (DESC)
-        f20 = sum((r.get("foreign_amt") or 0) for r in rows[:20])   # 한달 누계
-        i20 = sum((r.get("inst_amt")    or 0) for r in rows[:20])
 
-        def _daily(field: str) -> str:
-            parts = []
-            for r in recent3:
-                dt = r.get("trade_date", "")[-5:].replace("-", "/")  # MM/DD
-                parts.append(f"{dt} {_fmt_amt_mkrw(r.get(field) or 0)}")
-            return "  ".join(parts)
+        def _agg(field: str, n: int) -> int:
+            return sum((r.get(field) or 0) for r in rows[:n])
+
+        def _periods(field: str) -> str:
+            return (f"1D {_fmt_amt_mkrw(_agg(field, 1))}"
+                    f"  3D {_fmt_amt_mkrw(_agg(field, 3))}"
+                    f"  1W {_fmt_amt_mkrw(_agg(field, 5))}"
+                    f"  1M {_fmt_amt_mkrw(_agg(field, 20))}")
 
         info = (config.get_portfolio_detail().get(t)
              or config.get_universe_detail().get(t)
@@ -567,8 +567,8 @@ def _build_supply_summary(kr_tickers: list) -> str:
         name = info.get("name", t)
         lines.append(
             f"· {t} {name}\n"
-            f"  외국인  {_daily('foreign_amt')}  | 한달 {_fmt_amt_mkrw(f20)}\n"
-            f"  기관    {_daily('inst_amt')}  | 한달 {_fmt_amt_mkrw(i20)}"
+            f"  외국인  {_periods('foreign_amt')}\n"
+            f"  기관    {_periods('inst_amt')}"
         )
     return "\n".join(lines) if had_data else ""
 
