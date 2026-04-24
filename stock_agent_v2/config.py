@@ -209,6 +209,36 @@ def reload_universe():
     print(f"[Universe] 리로드 완료 → {len(_universe_detail)}종목")
 
 
+def append_universe_row(ticker: str, name: str = "", exchange: str = None) -> bool:
+    """universe.csv 에 종목 한 줄 추가. 이미 있으면 False, 추가하면 True.
+    추가 직후 in-memory `_universe_detail` 도 갱신해 FileWatcher reload 전에도
+    즉시 조회 가능.
+    """
+    ticker = ticker.upper()
+    if exchange is None:
+        exchange = "KRX" if ticker.isdigit() else "NASDAQ"
+    exchange = exchange.upper()
+    name = name or ticker
+
+    with _universe_lock:
+        if ticker in _universe_detail:
+            return False
+        created_new = not os.path.exists(UNIVERSE_PATH)
+        mode = "w" if created_new else "a"
+        with open(UNIVERSE_PATH, mode, encoding="utf-8-sig", newline="") as f:
+            w = csv.writer(f)
+            if created_new:
+                w.writerow(["ticker", "name", "exchange"])
+            w.writerow([ticker, name, exchange])
+        _universe_detail[ticker] = {
+            "name":        name,
+            "qty":         0,
+            "exchange":    exchange,
+            "is_overseas": exchange not in ("KRX", "KOSPI", "KOSDAQ"),
+        }
+    return True
+
+
 def get_portfolio_detail() -> dict:
     with _portfolio_lock:
         return dict(_portfolio_detail)
