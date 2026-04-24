@@ -89,18 +89,40 @@ class InvestorCollector:
         return out_rows
 
     def fetch_all_tickers(self, tickers: list) -> int:
-        """universe 등 다수 종목 수집. 반환: 저장된 행 수."""
+        """universe 등 다수 종목 수집. 반환: 저장된 행 수.
+
+        모든 KIS 호출이 끝난 뒤 단 한 번의 bulk upsert 로 DB 에 저장.
+        Turso(원격) 는 connection reset 가능성이 있어 종목별 개별 write 대신
+        batch 로 줄이고, 전체 bulk upsert 는 3회까지 재시도.
+        """
         if not tickers:
             return 0
-        total = 0
         print(f"\n[INVESTOR] {len(tickers)}종목 수급 수집 시작")
         if not self.kis.login():
             print("  [INVESTOR] KIS 로그인 실패 — 스킵")
             return 0
+
+        all_rows: list = []
         for t in tickers:
             rows = self.fetch_one(t)
             if rows:
-                total += upsert_investor_trend(rows)
+                all_rows.extend(rows)
             time.sleep(self.interval)
-        print(f"[INVESTOR] {total}행 저장 완료")
-        return total
+
+        if not all_rows:
+            print("[INVESTOR] 수집 데이터 없음")
+            return 0
+
+        for attempt in range(3):
+            try:
+                total = upsert_investor_trend(all_rows)
+                print(f"[INVESTOR] {total}행 저장 완료 ({len(tickers)}종목)")
+                return total
+            except Exception as e:
+                if attempt < 2:
+                    print(f"  [INVESTOR DB] 재시도 {attempt+1}/3: {e}")
+                    time.sleep(5)
+                else:
+                    print(f"  [INVESTOR DB] 저장 실패 — 다음 배치로 보류: {e}")
+                    return 0
+        return 0

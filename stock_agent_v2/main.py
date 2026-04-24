@@ -586,11 +586,15 @@ def run_kr_evening():
             return
         cmd_update(kr_tickers)
 
-        # universe 전체 외국인·기관 매매동향 (≈67종목 × 1초 ≈ 2분)
+        # universe 전체 외국인·기관 매매동향 (≈67종목 × 1초 ≈ 2분).
+        # 수급 수집이 실패해도 AI 분석은 진행 — 수급 블록은 전일 DB 데이터로 대체.
         from investor_collector import InvestorCollector
         universe_kr = [t for t in config.UNIVERSE
                        if not config.is_overseas(t)]
-        InvestorCollector().fetch_all_tickers(universe_kr)
+        try:
+            InvestorCollector().fetch_all_tickers(universe_kr)
+        except Exception as e:
+            print(f"[INVESTOR] 수급 수집 중단 (저녁 분석은 계속 진행): {e}")
 
         supply = _build_supply_summary(kr_tickers)
         header = (f"[REPORT] AI 주식 전략 | "
