@@ -248,9 +248,9 @@ def handle_command(chat_id: int, text: str, user_name: str):
 
     print(f"[{datetime.now():%H:%M:%S}] @{user_name}({chat_id}): {text}")
 
-    # 전체 분석
+    # 전체 분석 — 모닝 브리핑(US) + 저녁 분석(KR) 순차 실행
     if cmd in ("/analyze", "/분석"):
-        run_script(chat_id, "run_daily.py", task_name="전체분석")
+        run_script(chat_id, "run_daily.py", args=["full"], task_name="전체분석")
 
     # 단일 종목 (포트폴리오 외 종목도 가능)
     elif cmd in ("/single", "/종목"):
@@ -512,7 +512,7 @@ def handle_command(chat_id: int, text: str, user_name: str):
             "[REPORT] 주식 AI 분석 봇\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "[START] /analyze\n"
-            "   전체 포트폴리오 분석\n\n"
+            "   전체 배치 (모닝브리핑+저녁분석 순차, 5~8분 소요)\n\n"
             "[START] /single [종목코드]\n"
             "   단일 종목 즉시 분석\n"
             "   예) /single 005930\n"
