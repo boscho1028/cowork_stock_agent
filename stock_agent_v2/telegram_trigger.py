@@ -628,7 +628,10 @@ def main():
                 msg    = update.get("message") or update.get("edited_message")
                 if not msg:
                     continue
-                text = msg.get("text", "")
+                text = msg.get("text", "") or ""
+                # 슬래시 없이 "help" / "도움말" / "메뉴" 입력해도 /help 로 받아들임
+                if text.strip().lower() in ("help", "도움말", "메뉴", "menu"):
+                    text = "/help"
                 if not text or not text.startswith("/"):
                     continue
                 chat_id   = msg["chat"]["id"]
