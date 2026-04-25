@@ -26,3 +26,4 @@ logs/
 
 # 개인 보유 정보 (원하면 주석 해제)
 # portfolio.csv
+venv_kis/
