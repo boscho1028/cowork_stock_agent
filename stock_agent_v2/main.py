@@ -90,7 +90,8 @@ from dart_collector   import DartCollector
 from sec_collector    import SECCollector
 from analyzer         import StockAnalyzer
 from telegram_bot     import TelegramNotifier
-from chart_generator  import generate_chart
+from chart_generator  import generate_chart, generate_elliott_chart
+from elliott_wave     import compute_elliott_wave
 
 
 def _get_arg(args, key, default=None):
@@ -154,8 +155,10 @@ def cmd_update(tickers=None):
 
 
 def _make_chart(ticker: str, name: str) -> dict:
-    """일/주/월 차트를 각각 생성해 반환. {"D": bytes, "W": bytes, "M": bytes}."""
+    """일/주/월 차트 생성 + 엘리엇 검출 시 E 차트 추가.
+    반환: {"D": bytes, "W": bytes, "M": bytes, ["E": bytes]}"""
     charts = {}
+    daily_df = None
     for interval, limit in [("D", 400), ("W", 260), ("M", 60)]:
         try:
             df = load_candles(ticker, interval, limit=limit)
@@ -163,9 +166,23 @@ def _make_chart(ticker: str, name: str) -> dict:
                 charts[interval] = generate_chart(
                     df, ticker, name, config.INDICATOR_CONFIG, interval=interval
                 )
+                if interval == "D":
+                    daily_df = df
         except Exception as e:
             lbl = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
             print(f"  [WARN] {ticker} {lbl} 차트 생성 실패: {e}")
+
+    # 엘리엇 차트는 일봉이 있고 5파가 검출됐을 때만 생성 (PoC)
+    if daily_df is not None:
+        try:
+            elliott = compute_elliott_wave(daily_df, config.ELLIOTT_CONFIG)
+            if elliott.get("available"):
+                img = generate_elliott_chart(daily_df, ticker, name, elliott)
+                if img:
+                    charts["E"] = img
+        except Exception as e:
+            print(f"  [WARN] {ticker} 엘리엇 차트 생성 실패: {e}")
+
     return charts
 
 

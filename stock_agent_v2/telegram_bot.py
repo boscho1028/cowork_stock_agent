@@ -74,11 +74,13 @@ class TelegramNotifier:
                 self.send(analysis)
                 time.sleep(0.5)
 
-            # D → W → M 순서대로, 각 전송 후 대기로 순서 고정
+            # D → W → M → E 순서대로, 각 전송 후 대기로 순서 고정
+            # E (엘리엇 일봉) 는 5파 검출됐을 때만 charts 에 들어 있음
             sequence = [
                 ("D", analysis[:1024]),
                 ("W", f"[주봉] {ticker}"),
                 ("M", f"[월봉] {ticker}"),
+                ("E", f"[엘리엇 일봉] {ticker}"),
             ]
             for iv, caption in sequence:
                 img = charts.get(iv)

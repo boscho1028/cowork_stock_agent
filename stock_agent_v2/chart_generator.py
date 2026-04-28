@@ -339,6 +339,196 @@ def generate_chart(
     return buf.read()
 
 
+def generate_elliott_chart(
+    df: pd.DataFrame,
+    ticker: str,
+    name: str,
+    elliott: dict,
+) -> bytes | None:
+    """
+    엘리엇 5파 시각화 (PoC, 단일 패널 = 가격만).
+    구성:
+      - 캔들스틱 (P0 직전 ~ 마지막 봉)
+      - 파동 라벨 0~5 (원형 배지)
+      - 파동 연결 폴리라인
+      - 1파 기준 피보나치 되돌림 가로선 (23.6 / 38.2 / 50 / 61.8 / 78.6)
+      - 2-4 추세선 (실선) + 1-3 평행선 (점선)
+      - 점수·등급·경고 텍스트 박스
+
+    elliott = compute_elliott_wave() 의 반환값. available=False 면 None 반환.
+    """
+    if not elliott.get("available"):
+        return None
+    pts = elliott.get("points") or []
+    if len(pts) != 6:
+        return None
+
+    is_up = elliott["direction"] == "up"
+
+    # 차트 범위: P0 앞쪽 ~ 마지막 봉까지.
+    # 일봉 차트와 시간 범위를 맞춰 사용자가 "다른 데이터"로 오해하지 않게 함.
+    # 또한 P5 이후 가격 흐름(조정 진행 정도 등)을 함께 보여 매매 판단에 도움.
+    # 파동이 오래됐으면 자연스레 좌측에 압축되어 "이 패턴은 오래됐다" 가 드러남.
+    p0_idx = pts[0]["index"]
+    p5_idx = pts[5]["index"]
+    last_idx = len(df) - 1
+    span = max(p5_idx - p0_idx, 1)
+
+    pre_pad = max(int(span * 0.15), 5)
+    start_idx = max(0, p0_idx - pre_pad)
+    df_range = df.iloc[start_idx : last_idx + 1].copy()
+    n = len(df_range)
+    if n < 6:
+        return None
+
+    pts_rel = [{**p, "rx": p["index"] - start_idx} for p in pts]
+
+    fig = plt.figure(figsize=(14, 7), facecolor=C["bg"])
+    ax = fig.add_subplot(111)
+    ax.set_facecolor(C["panel"])
+    ax.tick_params(colors=C["text"], labelsize=8)
+    ax.yaxis.tick_right()
+    ax.grid(color=C["grid"], linewidth=0.4, alpha=0.6)
+    for spine in ax.spines.values():
+        spine.set_edgecolor(C["grid"])
+
+    # ── 캔들 ────────────────────────────────────────────────
+    price_range = df_range["high"].max() - df_range["low"].min()
+    min_body_h  = price_range * 0.002
+    w_body = 0.55
+    for i, (_, row) in enumerate(df_range.iterrows()):
+        is_bull = row["close"] >= row["open"]
+        col = C["bull"] if is_bull else C["bear"]
+        lo = min(row["open"], row["close"])
+        hi = max(row["open"], row["close"])
+        ax.plot([i, i], [row["low"], row["high"]], color=col, lw=0.7, zorder=4)
+        body_h = hi - lo
+        if body_h > min_body_h:
+            ax.add_patch(Rectangle((i - w_body/2, lo), w_body, body_h, color=col, zorder=5))
+        else:
+            mid = (lo + hi) / 2
+            ax.add_patch(Rectangle((i - w_body/2, mid - min_body_h/2), w_body, min_body_h, color=col, zorder=5))
+
+    # ── 피보 되돌림 (1파 시작점→끝점 기준) ────────────────────
+    p0_y = pts_rel[0]["price"]
+    p1_y = pts_rel[1]["price"]
+    fib_top = max(p0_y, p1_y)
+    fib_bot = min(p0_y, p1_y)
+    fib_rng = fib_top - fib_bot
+    for lv in (0.236, 0.382, 0.5, 0.618, 0.786):
+        if is_up:
+            y = fib_top - fib_rng * lv
+        else:
+            y = fib_bot + fib_rng * lv
+        ax.axhline(y, color="#9e9e9e", lw=0.5, linestyle="--", alpha=0.35, zorder=2)
+        ax.text(n - 0.5, y, f"  {lv*100:.1f}%",
+                color="#9e9e9e", fontsize=7, va="center", ha="left", alpha=0.7)
+
+    # ── 2-4 추세선 + 1-3 평행 채널 ─────────────────────────────
+    p1 = pts_rel[1]; p2 = pts_rel[2]; p4 = pts_rel[4]
+    if p4["rx"] != p2["rx"]:
+        slope = (p4["price"] - p2["price"]) / (p4["rx"] - p2["rx"])
+        x_a, x_b = p2["rx"] - 5, n - 1 + 3
+        y_a_24 = p2["price"] + slope * (x_a - p2["rx"])
+        y_b_24 = p2["price"] + slope * (x_b - p2["rx"])
+        ax.plot([x_a, x_b], [y_a_24, y_b_24],
+                color="#4ecdc4", lw=1.3, alpha=0.75, zorder=3, label="2-4 추세선")
+
+        y_a_13 = p1["price"] + slope * (x_a - p1["rx"])
+        y_b_13 = p1["price"] + slope * (x_b - p1["rx"])
+        ax.plot([x_a, x_b], [y_a_13, y_b_13],
+                color="#4ecdc4", lw=1.0, linestyle=":", alpha=0.6, zorder=3, label="1-3 평행선")
+
+    # ── 파동 폴리라인 + 라벨 배지 ─────────────────────────────
+    wave_color = "#ffeb3b"
+    wxs = [p["rx"] for p in pts_rel]
+    wys = [p["price"] for p in pts_rel]
+    ax.plot(wxs, wys, color=wave_color, lw=1.4, alpha=0.85,
+            marker="o", markersize=7, markerfacecolor=wave_color,
+            markeredgecolor="black", zorder=10, label="파동 경로")
+
+    for p in pts_rel:
+        idx = int(p["wave"])
+        # 상승 추진: 0=L, 1=H, 2=L, 3=H, 4=L, 5=H — H 위 / L 아래
+        if is_up:
+            above = (idx % 2 == 1)
+        else:
+            above = (idx % 2 == 0)
+        offy = 16 if above else -16
+        ax.annotate(
+            p["wave"],
+            xy=(p["rx"], p["price"]),
+            xytext=(0, offy), textcoords="offset points",
+            ha="center", va="center",
+            color="black", fontsize=10, fontweight="bold",
+            bbox=dict(boxstyle="circle,pad=0.35", facecolor=wave_color,
+                      edgecolor="black", linewidth=0.8),
+            zorder=11,
+        )
+
+    # ── 제목 ──────────────────────────────────────────────────
+    direction_lbl = "상승 추진" if is_up else "하락 추진"
+    title = (f"[엘리엇 일봉]  {name}({ticker})   "
+             f"{direction_lbl} | {elliott['current_wave']}   "
+             f"등급 {elliott['grade']} | 신뢰도 {elliott['confidence']}/100   "
+             f"[{df_range.index[-1].strftime('%Y-%m-%d')} 기준 | {n}봉]")
+    ax.set_title(title, color=C["text"], fontsize=10, pad=8, loc="left")
+
+    # ── 점수 박스 (좌상단) ────────────────────────────────────
+    sc = elliott["scores"]
+    ratios = elliott.get("ratios") or {}
+    info_txt = (
+        f"피보 {sc['fib']}/75  거래량 {sc['volume']}/60\n"
+        f"RSI {sc['rsi']}/30  추세선 {sc['trend']}/30\n"
+        f"비율 — 2:{ratios.get('w2',0):.2f}  3:{ratios.get('w3',0):.2f}  "
+        f"4:{ratios.get('w4',0):.2f}  5:{ratios.get('w5',0):.2f}"
+    )
+    ax.text(0.005, 0.985, info_txt,
+            transform=ax.transAxes, ha="left", va="top",
+            color=C["text"], fontsize=7.5,
+            bbox=dict(boxstyle="round,pad=0.35", facecolor=C["panel"],
+                      edgecolor=C["grid"], alpha=0.85))
+
+    # ── 경고 박스 (우상단) ────────────────────────────────────
+    warns = elliott.get("warnings") or []
+    if warns:
+        # ⚠ (U+26A0) 가 Malgun Gothic 에 없어 [!] 로 표기
+        warn_txt = "\n".join(f"[!] {w.replace('⚠ ', '')}" for w in warns[:3])
+        ax.text(0.995, 0.985, warn_txt,
+                transform=ax.transAxes, ha="right", va="top",
+                color="#ffb74d", fontsize=7.5,
+                bbox=dict(boxstyle="round,pad=0.35", facecolor=C["panel"],
+                          edgecolor="#ffb74d", alpha=0.85))
+
+    # ── y축 범위 ──────────────────────────────────────────────
+    pmin = min(df_range["low"].min(), min(wys))
+    pmax = max(df_range["high"].max(), max(wys))
+    mg = (pmax - pmin) * 0.06
+    ax.set_ylim(pmin - mg, pmax + mg)
+
+    # ── x축 ───────────────────────────────────────────────────
+    step = max(n // 10, 1)
+    ticks = list(range(0, n, step))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([df_range.index[i].strftime("%m/%d") for i in ticks],
+                       color=C["text"], fontsize=7.5)
+    ax.set_xlim(-1, n + 2)
+
+    ax.legend(loc="lower left", fontsize=7, ncol=3,
+              facecolor=C["panel"], labelcolor=C["text"],
+              edgecolor=C["grid"], framealpha=0.85)
+
+    fig.text(0.995, 0.005, "Stock AI Agent · Elliott PoC",
+             ha="right", va="bottom", color=C["grid"], fontsize=7, alpha=0.4)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight",
+                facecolor=C["bg"], edgecolor="none")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 def _error_image(ticker: str, msg: str) -> bytes:
     fig, ax = plt.subplots(figsize=(6, 2), facecolor=C["bg"])
     ax.set_facecolor(C["bg"])

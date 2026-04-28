@@ -15,6 +15,7 @@ import config
 from database import load_candles, load_latest_report
 from dart_collector import DartCollector
 from sec_collector  import SECCollector
+from elliott_wave   import compute_elliott_wave
 
 # Gemini는 선택 의존성. 미설치 시 Claude 전용 모드로 폴백.
 try:
@@ -533,6 +534,9 @@ class StockAnalyzer:
         # 일목균형표 (일봉 기준, 400봉으로 충분)
         ichi = compute_ichimoku(daily, cfg)
 
+        # 엘리엇 5파 추진파 검출 (일봉 PoC)
+        elliott = compute_elliott_wave(daily, config.ELLIOTT_CONFIG)
+
         # T-0/T-1 공시 (오늘 + 전 영업일). 휴일 대비 fetch는 5일치로 넉넉히.
         t1         = _t_minus_1_business_day()
         since_dart = t1.strftime("%Y%m%d")
@@ -564,7 +568,7 @@ class StockAnalyzer:
             ticker, name, qty, curr, currency, overseas,
             d_ind, w_ind, m_ind,
             d_pat, w_pat, m_pat,
-            ichi, disc_text, disc_label, report,
+            ichi, elliott, disc_text, disc_label, report,
         )
 
         text, provider = self._call_ai(prompt)
@@ -572,7 +576,7 @@ class StockAnalyzer:
 
     def _build_prompt(
         self, ticker, name, qty, curr, currency, overseas,
-        d, w, m, d_pat, w_pat, m_pat, ichi, disc, disc_label, report
+        d, w, m, d_pat, w_pat, m_pat, ichi, elliott, disc, disc_label, report
     ) -> str:
 
         fp = lambda v: _fp(v, overseas)
@@ -613,6 +617,32 @@ class StockAnalyzer:
         else:
             reason = ichi.get("reason", "데이터 부족")
             ichi_txt = f"계산 불가: {reason}"
+
+        # 엘리엇 파동 텍스트 (PoC: 일봉 추진 5파만, 모든 후보 노출)
+        if elliott.get("available"):
+            ell_pts = " → ".join(
+                f"{p['wave']}({p['date'][5:]}@{fp(p['price'])})"
+                for p in elliott["points"]
+            )
+            sc = elliott["scores"]
+            ratios = elliott.get("ratios", {})
+            ell_lines = [
+                f"방향: {'상승 추진' if elliott['direction']=='up' else '하락 추진'}  "
+                f"상태: {elliott['current_wave']}",
+                f"신뢰도: {elliott['confidence']}/100 (등급 {elliott['grade']})  "
+                f"raw {sc['raw']}/{sc['max']}",
+                f"세부 점수 — 피보 {sc['fib']}/75  거래량 {sc['volume']}/60  "
+                f"RSI {sc['rsi']}/30  추세선 {sc['trend']}/30",
+                f"파동: {ell_pts}",
+                f"피보 비율 — 2파 {ratios.get('w2',0):.2f}  3파 {ratios.get('w3',0):.2f}  "
+                f"4파 {ratios.get('w4',0):.2f}  5파 {ratios.get('w5',0):.2f}",
+            ]
+            if elliott.get("warnings"):
+                for wn in elliott["warnings"]:
+                    ell_lines.append(f"⚠ {wn}")
+            elliott_txt = "\n".join(ell_lines)
+        else:
+            elliott_txt = f"검출 안 됨: {elliott.get('reason', '데이터 부족')}"
 
         def fmt_pat(pat):
             lines = pat["patterns"] if pat["patterns"] else ["특이 패턴 없음"]
@@ -666,13 +696,17 @@ RSI: {m.get('rsi_signal','N/A')}
 
 ═══ 일목균형표 (일봉 기준) ═══
 {ichi_txt}
+
+═══ 엘리엇 파동 (일봉, 추진 5파 검출 PoC) ═══
+{elliott_txt}
 {fin}
 
 ═══ {disc_label} ═══
 {disc}
 
 ─────────────────────────────────────────────────────────
-아래 형식으로 텔레그램 채널 메시지를 작성하세요 (이모지 포함, 900자 이내):
+아래 형식으로 텔레그램 채널 메시지를 작성하세요 (이모지 포함, 1100자 이내).
+**모든 섹션은 필수**입니다. 길이 맞추려고 섹션을 누락하지 말고, 각 섹션 내용을 짧게 압축하세요.
 
 [REPORT] {name}({ticker}) [{market_tag}]
 💼 {qty:,}주 | 현재 {currency}{fp(curr)}{chg_str}
@@ -694,6 +728,13 @@ RSI: {m.get('rsi_signal','N/A')}
 · {{구름 위치}} | 전환 {fp(ichi.get('tenkan'))} / 기준 {fp(ichi.get('kijun'))}
 · 지지: {{지지레벨}} | 저항: {{저항레벨}}
 · {{전환/기준선 크로스 여부}}
+
+🌊 엘리엇 파동(일봉)
+· {{검출됐으면: "방향 + 상태 (등급 X, 신뢰도 XX/100)" 한 줄.
+   예: "상승 추진 5파 종료 임박 (등급 B, 74.4/100)"}}
+· {{검출됐으면: 다이버전스/연장 경고 있으면 한 줄로 명시. 없으면 생략}}
+· {{미검출이면: "명확한 5파 카운트 없음" 한 줄로만}}
+· {{매매 가중: B등급 이상이면 🎯 전략에 반영, C/D 는 참고만}}
 
 [DART] {disc_label}
 · {{최근 2영업일(T-0/T-1) 공시가 없으면 "특이 없음" 한 줄.
