@@ -50,9 +50,28 @@ if __name__ == "__main__":
     print(f"[{ticker}] 단일 종목 분석 시작...")
     cmd_update(tickers=[ticker])
 
+    # KIS 가 시세를 한 건도 못 내려주면 = 미상장·상폐·코드 오인식.
+    # 이 경우 빈 DB 로 분석을 돌리면 모든 지표가 N/A 인 무의미한 리포트가 나가므로,
+    # 명시적 에러 알림 후 즉시 종료한다 (universe 자동 등록도 자연히 차단됨).
+    if not _has_candles(ticker):
+        from telegram_bot import TelegramNotifier
+        msg = (
+            f"[ERROR] [단일분석] {ticker} 시세 데이터를 가져올 수 없습니다.\n"
+            f"- KIS 가 해당 종목코드를 인식하지 못합니다.\n"
+            f"- 미상장·상장폐지·코드 오인식 가능성이 높습니다.\n"
+            f"- 종목코드를 다시 확인해 주세요."
+        )
+        print(msg)
+        try:
+            TelegramNotifier(
+                config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID
+            ).send(msg)
+        except Exception as e:
+            print(f"[WARN] 텔레그램 알림 실패: {e}")
+        sys.exit(2)
+
     # 새 종목이고 시세 수집에 실제로 성공했다면 universe.csv 영구 등록.
-    # 실패 종목(KIS 미지원·티커 오인식 등)은 DB 가 비어 있으므로 자동 배제.
-    if was_new and _has_candles(ticker):
+    if was_new:
         resolved = exchange or ("KRX" if ticker.isdigit() else "NASDAQ")
         if config.append_universe_row(ticker, exchange=resolved):
             print(f"[{ticker}] universe.csv 자동 추가 "
