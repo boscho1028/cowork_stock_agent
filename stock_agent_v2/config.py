@@ -74,6 +74,9 @@ TURSO_AUTH_TOKEN   = os.getenv("TURSO_AUTH_TOKEN",   "")
 #     한국 포트폴리오 업데이트 + AI 분석 + 차트 전송
 MORNING_BRIEF_TIME    = os.getenv("MORNING_BRIEF_TIME",    "07:30")
 EVENING_ANALYZE_TIME  = os.getenv("EVENING_ANALYZE_TIME",  "17:00")
+# 시장 경고 브리핑 (CNN F&G + 시세 + 신용/유동성·AI 우려 뉴스).
+# 모닝 브리핑보다 5분 먼저 보내서 두 알림이 겹치지 않게 함.
+MARKET_WARNING_TIME   = os.getenv("MARKET_WARNING_TIME",   "07:25")
 
 # ── 기술적 지표 파라미터 ─────────────────────────────────────────────
 # ── 시그널 규칙 파라미터 ─────────────────────────────────────────────

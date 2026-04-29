@@ -656,14 +656,18 @@ if __name__ == "__main__":
     elif "--weekly"    in args: cmd_weekly_report(primary=model_arg)
     elif "--signals"   in args: cmd_signals(tickers)
     else:
-        # 스케줄 모드: 주중(월~금) 2회
+        # 스케줄 모드: 주중(월~금) 3회
+        #   · MARKET_WARNING_TIME — 시장 경고 브리핑 (F&G + 시세 + 신용/AI 뉴스)
         #   · MORNING_BRIEF_TIME  — 미국 업데이트 + 한국 DART 공시 요약
         #   · EVENING_ANALYZE_TIME — 한국 포트폴리오 업데이트 + AI 분석
+        from market_warning import run_market_warning
         print(f"스케줄 모드 | 주중(월~금) "
+              f"{config.MARKET_WARNING_TIME} 시장경고, "
               f"{config.MORNING_BRIEF_TIME} 모닝브리핑, "
               f"{config.EVENING_ANALYZE_TIME} 저녁분석")
         print("Ctrl+C 로 종료\n")
         for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
+            getattr(schedule.every(), day).at(config.MARKET_WARNING_TIME).do(run_market_warning)
             getattr(schedule.every(), day).at(config.MORNING_BRIEF_TIME).do(run_morning_brief)
             getattr(schedule.every(), day).at(config.EVENING_ANALYZE_TIME).do(run_kr_evening)
         while True:

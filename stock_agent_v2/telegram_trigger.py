@@ -293,6 +293,10 @@ def handle_command(chat_id: int, text: str, user_name: str):
     elif cmd in ("/dart", "/공시"):
         run_script(chat_id, "run_dart.py", task_name="공시확인")
 
+    # 시장 경고 브리핑 (F&G + 시세 + 신용/AI 뉴스). 매일 07:25 자동 + 온디맨드.
+    elif cmd in ("/warning", "/경고", "/market"):
+        run_script(chat_id, "run_market_warning.py", task_name="시장경고")
+
     # 외국인·기관 수급 동향 (DB 읽기 · 저녁 배치가 일 1회 갱신)
     elif cmd in ("/supply", "/수급"):
         from main import _build_supply_summary, _split_portfolio
@@ -574,6 +578,7 @@ BOT_COMMANDS = [
     ("single",    "단일 종목 즉시 분석 (/single 005930)"),
     ("signals",   "시그널 스캔 (/signals [portfolio|종목])"),
     ("dart",      "DART/SEC 공시 확인"),
+    ("warning",   "시장 경고 브리핑 (F&G + 시세 + 신용/AI 뉴스)"),
     ("supply",    "외국인·기관 매매동향 (/supply [종목])"),
     ("update",    "universe 전체 가격 업데이트"),
     ("weekly",    "주간 전략 리포트"),
