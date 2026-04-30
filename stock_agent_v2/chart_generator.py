@@ -59,12 +59,12 @@ MA_COLORS = {
     120: "#ce93d8",   # 연보라
 }
 
-# 인터벌별 기본값. 일목구름은 일/주/월 모두 켜되, 후행스팬·미래 구름은 일봉만
-# (주봉·월봉에서 후행/미래는 시각적으로 의미가 약하고 차트 혼잡을 키움).
+# 인터벌별 기본값. 일목구름·선행스팬(미래 구름) 모두 켬. 후행스팬은 일봉만
+# (주봉·월봉에서 후행은 캔들과 동일 색으로 보여 혼잡만 키움).
 _DEFAULTS = {
-    "D": {"n": 80,  "cfg_key": "ma_periods",         "label": "일봉", "ichi": True, "future": True,  "chikou": True},
-    "W": {"n": 78,  "cfg_key": "ma_periods_weekly",   "label": "주봉", "ichi": True, "future": False, "chikou": False},
-    "M": {"n": 36,  "cfg_key": "ma_periods_monthly",  "label": "월봉", "ichi": True, "future": False, "chikou": False},
+    "D": {"n": 80,  "cfg_key": "ma_periods",         "label": "일봉", "ichi": True, "future": True, "chikou": True},
+    "W": {"n": 78,  "cfg_key": "ma_periods_weekly",   "label": "주봉", "ichi": True, "future": True, "chikou": False},
+    "M": {"n": 36,  "cfg_key": "ma_periods_monthly",  "label": "월봉", "ichi": True, "future": True, "chikou": False},
 }
 
 
@@ -92,14 +92,17 @@ def generate_chart(
 
     os_line = cfg.get("rsi_oversold",   30)
     ob_line = cfg.get("rsi_overbought", 85)
-    # 일목 파라미터: D 는 표준 9/26/52/26. W/M 은 단축 9/13/26/13 사용.
-    # W/M 에 표준 26/52 를 그대로 쓰면 26봉 shift 가 26주(=5개월)/26개월(=2년+) 이라
-    # 강한 추세 종목에서 구름이 캔들과 가격대 차이가 커져 차트 하단에 압축됨.
-    # 짧은 주기는 시간차가 줄어 구름이 캔들 가까이 위치해 시각적으로 명확.
+    # 일목 파라미터: 시간프레임별로 단축 — 표준 26봉 shift 를 그대로 쓰면
+    # 강한 추세 종목에서 구름이 차트 하단 좁은 영역으로 압축되어 안 보임.
+    # D : 표준 9/26/52/26 (전환9·기준26·스팬B52·shift26)
+    # W : 단축 9/13/26/13   (시간차 절반)
+    # M : 더 단축 5/8/13/8  (월봉은 더 강한 단축 필요)
     if interval == "D":
         t_n, k_n, sb_n, offset = 9, 26, 52, 26
-    else:
+    elif interval == "W":
         t_n, k_n, sb_n, offset = 9, 13, 26, 13
+    else:  # M
+        t_n, k_n, sb_n, offset = 5, 8, 13, 8
 
     df = df_daily.tail(n_candles).copy()
     n  = len(df)
