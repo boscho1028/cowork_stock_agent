@@ -116,6 +116,17 @@ INDICATOR_CONFIG = {
     "ichimoku_kijun":     26,
     "ichimoku_span_b":    52,
     "ichimoku_offset":    26,
+    # 5일선 풀백 시그널 (Round 4 backtest 검증 — gap_atr 임계값, 3단계)
+    # Round 4 결과: gap≥4.0 ATR 이격 후 평균 1~2일 -1.9% 조정 → 진입 후 평균
+    # +8.85%/trade (n=27, profit factor 8.77, max DD -7.2%, p=0.006).
+    # 9 조합 grid 모두 양의 mean, 8/9 p<0.10 — robust 검증됨.
+    "pullback_atr_strong":   4.0,   # 🔥 강력  — 검증된 sweet spot (실거래 후보)
+    "pullback_atr_moderate": 3.0,   # 📈 보조  — 표본 多, mean 약하지만 일관
+    "pullback_atr_watch":    2.0,   # 👁️ 관찰 — baseline 보다 약간 위, 모니터링용
+    "pullback_wait_days":    2,     # 진입 대기 영업일 수
+    "pullback_sl_pct":       -10.0, # 손절 -10%
+    "pullback_tp_pct":       +20.0, # 익절 +20%
+    "pullback_max_hold":     10,    # 최대 보유일
 }
 
 # ── 엘리엇 파동 (PoC: 추진 5파만, 일봉 기준) ─────────────────────────

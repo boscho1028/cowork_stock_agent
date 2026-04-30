@@ -309,6 +309,88 @@ def compute_ichimoku(df: pd.DataFrame, cfg: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 3.5. 5일선 풀백 시그널 (Round 4 backtest 검증)
+# ═══════════════════════════════════════════════════════════════════════
+
+def compute_pullback_signal(df: pd.DataFrame, cfg: dict) -> dict:
+    """gap_atr = (close - MA5) / ATR14 가 임계값 초과 시 풀백 매매 후보. (3단계)
+
+    검증된 매매 룰 (Round 4 backtest, sweet spot = STRONG):
+      gap≥4.0 ATR → 평균 1~2일 -1.9% 조정 → 진입 → streak 깨짐 / 익절 +20% /
+      손절 -10% / 보유 max 10일.   n=27, mean +8.85%, PF 8.77, p=0.006.
+    MODERATE/WATCH 는 동일 가이드, 강도만 약함 (LLM 의사결정에 반영).
+
+    반환:
+      level    : "STRONG" | "MODERATE" | "WATCH" | None
+      gap_atr  : 현재 ATR 단위 이격률 (음수면 MA5 아래)
+      message  : 한 줄 시그널 메시지
+      entry_in : 진입까지 대기 영업일 수 (시그널 없으면 None)
+      sl_price / tp_price : 진입 가정 시 손절·익절 가격 (현재가 기준 추정)
+    """
+    if len(df) < 14:
+        return {"level": None, "gap_atr": None, "message": "", "entry_in": None}
+
+    c, h, l = df["close"], df["high"], df["low"]
+    ma5 = c.rolling(5).mean().iloc[-1]
+    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()],
+                   axis=1).max(axis=1)
+    atr14 = tr.rolling(14).mean().iloc[-1]
+    if pd.isna(ma5) or pd.isna(atr14) or atr14 == 0:
+        return {"level": None, "gap_atr": None, "message": "", "entry_in": None}
+
+    price = float(c.iloc[-1])
+    gap_atr = float((price - ma5) / atr14)
+
+    strong   = cfg.get("pullback_atr_strong",   4.0)
+    moderate = cfg.get("pullback_atr_moderate", 3.0)
+    watch    = cfg.get("pullback_atr_watch",    2.0)
+    wait     = cfg.get("pullback_wait_days",    2)
+    sl_pct   = cfg.get("pullback_sl_pct",      -10.0) / 100
+    tp_pct   = cfg.get("pullback_tp_pct",       20.0) / 100
+
+    # 진입가는 wait일 후 종가로 unknown — 현재가를 placeholder 로
+    sl_price = price * (1 + sl_pct)
+    tp_price = price * (1 + tp_pct)
+
+    base = {
+        "gap_atr":  gap_atr,
+        "ma5":      float(ma5),
+        "atr14":    float(atr14),
+        "entry_in": wait,
+        "sl_price": sl_price,
+        "tp_price": tp_price,
+    }
+
+    if gap_atr >= strong:
+        return {**base,
+            "level":   "STRONG",
+            "icon":    "🔥",
+            "message": f"🔥 STRONG 풀백 시그널 — gap {gap_atr:+.2f} ATR ≥ {strong} (검증된 sweet spot)",
+        }
+    if gap_atr >= moderate:
+        return {**base,
+            "level":   "MODERATE",
+            "icon":    "📈",
+            "message": f"📈 MODERATE 풀백 시그널 — gap {gap_atr:+.2f} ATR ≥ {moderate} (보조 강도)",
+        }
+    if gap_atr >= watch:
+        return {**base,
+            "level":   "WATCH",
+            "icon":    "👁️",
+            "message": f"👁️ WATCH 풀백 시그널 — gap {gap_atr:+.2f} ATR ≥ {watch} (관찰 단계)",
+        }
+    return {
+        "level":    None,
+        "gap_atr":  gap_atr,
+        "ma5":      float(ma5),
+        "atr14":    float(atr14),
+        "message":  f"gap {gap_atr:+.2f} ATR — 시그널 없음 "
+                    f"(관찰≥{watch}, 보조≥{moderate}, 강력≥{strong})",
+        "entry_in": None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 4. 포맷 헬퍼
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -534,6 +616,9 @@ class StockAnalyzer:
         # 일목균형표 (일봉 기준, 400봉으로 충분)
         ichi = compute_ichimoku(daily, cfg)
 
+        # 5일선 풀백 시그널 (Round 4 backtest 검증)
+        pullback = compute_pullback_signal(daily, cfg)
+
         # 엘리엇 5파 추진파 검출 (일봉 PoC)
         elliott = compute_elliott_wave(daily, config.ELLIOTT_CONFIG)
 
@@ -568,7 +653,7 @@ class StockAnalyzer:
             ticker, name, qty, curr, currency, overseas,
             d_ind, w_ind, m_ind,
             d_pat, w_pat, m_pat,
-            ichi, elliott, disc_text, disc_label, report,
+            ichi, pullback, elliott, disc_text, disc_label, report,
         )
 
         text, provider = self._call_ai(prompt)
@@ -576,7 +661,7 @@ class StockAnalyzer:
 
     def _build_prompt(
         self, ticker, name, qty, curr, currency, overseas,
-        d, w, m, d_pat, w_pat, m_pat, ichi, elliott, disc, disc_label, report
+        d, w, m, d_pat, w_pat, m_pat, ichi, pullback, elliott, disc, disc_label, report
     ) -> str:
 
         fp = lambda v: _fp(v, overseas)
@@ -599,6 +684,21 @@ class StockAnalyzer:
                 f"순이익 {_f(report.get('net_income'),1)}억  "
                 f"부채비율 {_f(report.get('debt_ratio'),1)}%"
             )
+
+        # 풀백 시그널 텍스트 (Round 4 backtest 검증된 매매 룰)
+        if pullback.get("level"):
+            pull_lines = [
+                pullback["message"],
+                f"MA5: {fp(pullback['ma5'])}  ATR(14): {_f(pullback['atr14'],2)}",
+                f"진입: {pullback['entry_in']}거래일 후 종가 (검증된 단기 조정 -1.9% 활용)",
+                f"손절: {fp(pullback['sl_price'])} (-{abs(self.cfg['pullback_sl_pct']):.0f}%)  "
+                f"익절: {fp(pullback['tp_price'])} (+{self.cfg['pullback_tp_pct']:.0f}%)  "
+                f"청산 보조: close < MA5 또는 max {self.cfg['pullback_max_hold']}일 보유",
+                f"검증 성과: 평균 +8.85%/trade, profit factor 8.77, max DD -7.2%, p=0.006 (n=27)",
+            ]
+            pullback_txt = "\n".join(pull_lines)
+        else:
+            pullback_txt = pullback.get("message", "데이터 부족")
 
         # 일목균형표 텍스트
         if ichi.get("available"):
@@ -697,6 +797,9 @@ RSI: {m.get('rsi_signal','N/A')}
 ═══ 일목균형표 (일봉 기준) ═══
 {ichi_txt}
 
+═══ 5일선 풀백 시그널 (검증된 매매 룰) ═══
+{pullback_txt}
+
 ═══ 엘리엇 파동 (일봉, 추진 5파 검출 PoC) ═══
 {elliott_txt}
 {fin}
@@ -728,6 +831,17 @@ RSI: {m.get('rsi_signal','N/A')}
 · {{구름 위치}} | 전환 {fp(ichi.get('tenkan'))} / 기준 {fp(ichi.get('kijun'))}
 · 지지: {{지지레벨}} | 저항: {{저항레벨}}
 · {{전환/기준선 크로스 여부}}
+
+🎯 5일선 풀백 시그널
+· {{시그널 발생 시: 강도(🔥STRONG≥4.0 / 📈MODERATE≥3.0 / 👁️WATCH≥2.0) + 현재 gap_atr 값.
+   예: "🔥 STRONG — gap +4.21 ATR (검증된 sweet spot)" /
+       "📈 MODERATE — gap +3.15 ATR (보조)" /
+       "👁️ WATCH — gap +2.34 ATR (관찰 단계)"}}
+· {{시그널 발생 시: 진입·청산 가이드 한 줄로.
+   예: "{self.cfg['pullback_wait_days']}거래일 대기 후 종가 진입 / 손절 -{abs(self.cfg['pullback_sl_pct']):.0f}% / 익절 +{self.cfg['pullback_tp_pct']:.0f}% / close<MA5 시 청산"}}
+· {{시그널 없으면: "현재 gap X.XX ATR (시그널 없음)" 한 줄로만.
+   강도별 매매 가중: STRONG → 🎯 전략 적극 반영,  MODERATE → 보조 참고,
+   WATCH → 관찰만 (단독 진입 근거 안 됨)}}
 
 🌊 엘리엇 파동(일봉)
 · {{검출됐으면: "방향 + 상태 (등급 X, 신뢰도 XX/100)" 한 줄.
