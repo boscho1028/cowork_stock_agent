@@ -59,11 +59,12 @@ MA_COLORS = {
     120: "#ce93d8",   # 연보라
 }
 
-# 인터벌별 기본값
+# 인터벌별 기본값. 일목구름은 일/주/월 모두 켜되, 후행스팬·미래 구름은 일봉만
+# (주봉·월봉에서 후행/미래는 시각적으로 의미가 약하고 차트 혼잡을 키움).
 _DEFAULTS = {
-    "D": {"n": 80,  "cfg_key": "ma_periods",         "label": "일봉", "ichi": True,  "future": True,  "chikou": True},
-    "W": {"n": 78,  "cfg_key": "ma_periods_weekly",   "label": "주봉", "ichi": False, "future": False, "chikou": False},
-    "M": {"n": 36,  "cfg_key": "ma_periods_monthly",  "label": "월봉", "ichi": False, "future": False, "chikou": False},
+    "D": {"n": 80,  "cfg_key": "ma_periods",         "label": "일봉", "ichi": True, "future": True,  "chikou": True},
+    "W": {"n": 78,  "cfg_key": "ma_periods_weekly",   "label": "주봉", "ichi": True, "future": False, "chikou": False},
+    "M": {"n": 36,  "cfg_key": "ma_periods_monthly",  "label": "월봉", "ichi": True, "future": False, "chikou": False},
 }
 
 
@@ -91,10 +92,14 @@ def generate_chart(
 
     os_line = cfg.get("rsi_oversold",   30)
     ob_line = cfg.get("rsi_overbought", 85)
-    t_n     = cfg.get("ichimoku_tenkan",  9)
-    k_n     = cfg.get("ichimoku_kijun",  26)
-    sb_n    = cfg.get("ichimoku_span_b", 52)
-    offset  = cfg.get("ichimoku_offset", 26)
+    # 일목 파라미터: D 는 표준 9/26/52/26. W/M 은 단축 9/13/26/13 사용.
+    # W/M 에 표준 26/52 를 그대로 쓰면 26봉 shift 가 26주(=5개월)/26개월(=2년+) 이라
+    # 강한 추세 종목에서 구름이 캔들과 가격대 차이가 커져 차트 하단에 압축됨.
+    # 짧은 주기는 시간차가 줄어 구름이 캔들 가까이 위치해 시각적으로 명확.
+    if interval == "D":
+        t_n, k_n, sb_n, offset = 9, 26, 52, 26
+    else:
+        t_n, k_n, sb_n, offset = 9, 13, 26, 13
 
     df = df_daily.tail(n_candles).copy()
     n  = len(df)
@@ -159,14 +164,21 @@ def generate_chart(
 
     # ── 패널1: 일목 구름 ─────────────────────────────────────────────────
     if show_ichi:
-        # 과거 구름
+        # 과거 구름. 주봉/월봉은 26봉 shift 가 긴 시간대라 캔들과 가격대가 크게
+        # 벌어져(예: 5개월 전 가격 vs 현재) 차트에서 구름이 작은 영역에 압축됨.
+        # 알파를 높이고 hatch 패턴으로 시각 식별성을 보강.
+        if interval == "D":
+            cloud_alpha, cloud_hatch = 0.18, None
+        else:
+            cloud_alpha, cloud_hatch = 0.45, "//"
         for i in range(n - 1):
             sa, sb = span_a_s[i], span_b_s[i]
             if np.isnan(sa) or np.isnan(sb):
                 continue
             col = C["cloud_bull"] if sa >= sb else C["cloud_bear"]
             ax_c.fill_between([i, i+1], [min(sa,sb)]*2, [max(sa,sb)]*2,
-                              color=col, alpha=0.15, zorder=1)
+                              color=col, alpha=cloud_alpha, zorder=1,
+                              hatch=cloud_hatch, linewidth=0)
 
         # 미래 구름 (일봉만)
         if show_future:
@@ -180,12 +192,14 @@ def generate_chart(
                                   color=col, alpha=0.22, hatch="////",
                                   linewidth=0, zorder=1)
 
-        # 선행스팬 선
+        # 선행스팬 선 — 주봉/월봉은 가격대 차이로 구름 fill 이 옅어 보일 수 있어
+        # 라인을 더 굵게 그려 위치 식별성 보강.
+        span_lw = 0.7 if interval == "D" else 1.4
         span_xs = np.concatenate([xs, xs_future]) if show_future else xs
         sa_vals = np.concatenate([span_a_s, future_a]) if show_future else span_a_s
         sb_vals = np.concatenate([span_b_s, future_b]) if show_future else span_b_s
-        ax_c.plot(span_xs, sa_vals, color=C["span_a"], lw=0.7, alpha=0.7, zorder=2, label="선행A")
-        ax_c.plot(span_xs, sb_vals, color=C["span_b"], lw=0.7, alpha=0.7, zorder=2, label="선행B")
+        ax_c.plot(span_xs, sa_vals, color=C["span_a"], lw=span_lw, alpha=0.85, zorder=2, label="선행A")
+        ax_c.plot(span_xs, sb_vals, color=C["span_b"], lw=span_lw, alpha=0.85, zorder=2, label="선행B")
 
         # 기준선/전환선
         ax_c.plot(xs, kijun_s,  color=C["kijun"],  lw=1.3, zorder=3, label=f"기준({k_n})")
@@ -344,9 +358,10 @@ def generate_elliott_chart(
     ticker: str,
     name: str,
     elliott: dict,
+    interval: str = "D",
 ) -> bytes | None:
     """
-    엘리엇 5파 시각화 (PoC, 단일 패널 = 가격만).
+    엘리엇 5파 시각화 (단일 패널 = 가격만).
     구성:
       - 캔들스틱 (P0 직전 ~ 마지막 봉)
       - 파동 라벨 0~5 (원형 배지)
@@ -355,8 +370,10 @@ def generate_elliott_chart(
       - 2-4 추세선 (실선) + 1-3 평행선 (점선)
       - 점수·등급·경고 텍스트 박스
 
+    interval: "D" | "W" | "M" — 타이틀 라벨에만 영향.
     elliott = compute_elliott_wave() 의 반환값. available=False 면 None 반환.
     """
+    interval_label = {"D": "일봉", "W": "주봉", "M": "월봉"}.get(interval, "일봉")
     if not elliott.get("available"):
         return None
     pts = elliott.get("points") or []
@@ -468,7 +485,7 @@ def generate_elliott_chart(
 
     # ── 제목 ──────────────────────────────────────────────────
     direction_lbl = "상승 추진" if is_up else "하락 추진"
-    title = (f"[엘리엇 일봉]  {name}({ticker})   "
+    title = (f"[엘리엇 {interval_label}]  {name}({ticker})   "
              f"{direction_lbl} | {elliott['current_wave']}   "
              f"등급 {elliott['grade']} | 신뢰도 {elliott['confidence']}/100   "
              f"[{df_range.index[-1].strftime('%Y-%m-%d')} 기준 | {n}봉]")

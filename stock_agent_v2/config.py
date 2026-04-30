@@ -137,6 +137,30 @@ ELLIOTT_CONFIG = {
     "max_trend":      30,
 }
 
+# 인터벌별 ELLIOTT_CONFIG 오버라이드 — get_elliott_config(interval) 로 병합.
+# 일봉 3% 변동이 주봉/월봉에선 너무 작아 노이즈 스윙이 잡힘 → 임계값을 키우고
+# min_bars / max_p5_age 도 시간프레임에 맞게 축소.
+ELLIOTT_CONFIG_OVERRIDES = {
+    "D": {},  # 기본값 그대로
+    "W": {
+        "swing_min_pct":  6.0,   # 주봉 1개당 변동이 일봉보다 큼
+        "min_bars":      60,     # 60주 ≈ 14개월 (1.2년)
+        "max_p5_age":    26,     # 26주 ≈ 6개월
+    },
+    "M": {
+        "swing_min_pct": 12.0,   # 월봉은 더 큰 변동만 의미 있는 스윙
+        "min_bars":      24,     # 24개월
+        "max_p5_age":    12,     # 12개월
+    },
+}
+
+
+def get_elliott_config(interval: str = "D") -> dict:
+    """인터벌별 Elliott 설정 반환. 기본값에 인터벌 오버라이드 병합."""
+    cfg = dict(ELLIOTT_CONFIG)
+    cfg.update(ELLIOTT_CONFIG_OVERRIDES.get(interval, {}))
+    return cfg
+
 # ── 거래소 코드 매핑 (해외주식 KIS EXCD) ─────────────────────────────
 # KIS 해외주식 거래소 코드
 EXCHANGE_TO_EXCD = {

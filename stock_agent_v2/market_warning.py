@@ -136,15 +136,16 @@ def nvda_status_label(price: float) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 3. 뉴스 검색 (Google News RSS — 무료, 키 불필요)
+# 3. 뉴스 검색 (Hybrid: Serper.dev 우선 → 실패 시 Google News RSS 폴백)
 # ═══════════════════════════════════════════════════════════════════════
 
+SERPER_URL = "https://google.serper.dev/search"
 GNEWS_URL = (
     "https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
 )
 
-# 카테고리별 검색 쿼리 — Google News RSS 는 복잡한 OR/큐트 조합을 잘 처리 못 함.
-# 단순한 핵심 구문 1~2개로 정확 매칭(quoted) 위주로 구성.
+# 카테고리별 검색 쿼리. Serper.dev 는 복잡한 OR 도 잘 처리하지만 RSS 는 단순한
+# 구문이 안전 — 두 경로 모두 동작하도록 적당히 짧게.
 NEWS_QUERIES = {
     "credit_liquidity": '"private credit" stress OR "liquidity squeeze"',
     "ai_concerns":      '"AI bubble" OR "AI valuation"',
@@ -170,24 +171,43 @@ def _humanize_age(pub_str: str) -> str:
         return "최근"
 
 
-def fetch_news_snippets(query: str, limit: int = 7, days: int = 7) -> list[dict]:
-    """Google News RSS 로 뉴스 검색.
+def _serper_search(query: str, limit: int, days: int) -> list[dict]:
+    """Serper.dev 검색. SERPER_API_KEY 가 없거나 실패 시 빈 리스트 반환."""
+    api_key = os.getenv("SERPER_API_KEY", "")
+    if not api_key:
+        return []
+    try:
+        r = requests.post(
+            SERPER_URL,
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": query, "tbs": f"qdr:d{days}"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            print(f"  [WARN] Serper {r.status_code} — RSS 폴백")
+            return []
+        items = r.json().get("organic", [])[:limit]
+        return [
+            {
+                "date":    it.get("date", "최근"),
+                "title":   (it.get("title") or "").strip(),
+                "source":  (it.get("source") or "").strip(),
+                "snippet": (it.get("snippet") or "").strip(),
+                "link":    it.get("link", ""),
+            }
+            for it in items
+        ]
+    except Exception as e:
+        print(f"  [WARN] Serper 호출 실패 ({type(e).__name__}) — RSS 폴백")
+        return []
 
-    description 필드는 단순 링크 HTML 이라 의미 정보가 없음. **title + source**
-    가 LLM 에 풍부한 컨텍스트를 제공하므로 출처 매체명을 함께 추출한다.
 
-    days: when:Nd 검색 연산자로 최근 N일 제한.
-
-    반환: [{"date","title","source","link"}, ...]  실패 시 빈 리스트.
-    """
+def _gnews_rss_search(query: str, limit: int, days: int) -> list[dict]:
+    """Google News RSS 검색. 키 불필요·무제한이지만 snippet 제공 안 됨."""
     full_q = f"{query} when:{days}d"
     url = GNEWS_URL.format(q=quote_plus(full_q))
     try:
-        r = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
-        )
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         r.raise_for_status()
         root = ET.fromstring(r.content)
         out: list[dict] = []
@@ -197,19 +217,34 @@ def fetch_news_snippets(query: str, limit: int = 7, days: int = 7) -> list[dict]
                 continue
             src_el = it.find("source")
             source = (src_el.text or "").strip() if src_el is not None else ""
-            # 헤드라인 끝의 " - Source Name" 부분 정리 (source 와 중복)
             if source and title.endswith(f" - {source}"):
                 title = title[: -len(f" - {source}")].strip()
             out.append({
                 "date":    _humanize_age(it.findtext("pubDate") or ""),
                 "title":   title,
                 "source":  source,
+                "snippet": "",   # RSS 는 의미있는 snippet 미제공
                 "link":    (it.findtext("link") or "").strip(),
             })
         return out
     except Exception as e:
-        print(f"  [WARN] Google News RSS 실패 ({query[:30]}...): {e}")
+        print(f"  [WARN] Google News RSS 실패: {e}")
         return []
+
+
+def fetch_news_snippets(query: str, limit: int = 7, days: int = 7) -> list[dict]:
+    """Hybrid 뉴스 검색: Serper.dev 우선 → 실패 시 Google News RSS 폴백.
+
+    Serper 가 동작하면 snippet 까지 풍부하게 반환되어 LLM 요약 품질이 올라감.
+    SERPER_API_KEY 미설정 / 한도 초과 / API 다운 등 어느 경우든 RSS 로 폴백해
+    뉴스 블록이 비지 않도록 보장.
+
+    반환: [{"date","title","source","snippet","link"}, ...]
+    """
+    items = _serper_search(query, limit, days)
+    if items:
+        return items
+    return _gnews_rss_search(query, limit, days)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -222,8 +257,12 @@ def _format_news_for_prompt(label: str, items: list[dict]) -> str:
     lines = [f"{label}:"]
     for it in items:
         src = it.get("source", "").strip()
+        snip = it.get("snippet", "").strip()
         src_tag = f" ({src})" if src else ""
-        lines.append(f"  [{it['date']}]{src_tag} {it['title']}")
+        if snip:
+            lines.append(f"  [{it['date']}]{src_tag} {it['title']} — {snip[:220]}")
+        else:
+            lines.append(f"  [{it['date']}]{src_tag} {it['title']}")
     return "\n".join(lines)
 
 

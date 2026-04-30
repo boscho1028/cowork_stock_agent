@@ -155,10 +155,11 @@ def cmd_update(tickers=None):
 
 
 def _make_chart(ticker: str, name: str) -> dict:
-    """일/주/월 차트 생성 + 엘리엇 검출 시 E 차트 추가.
-    반환: {"D": bytes, "W": bytes, "M": bytes, ["E": bytes]}"""
+    """일/주/월 차트 생성 + 인터벌별 엘리엇 검출 시 E/E_W/E_M 차트 추가.
+    반환: {"D": bytes, "W": bytes, "M": bytes,
+            ["E": bytes, "E_W": bytes, "E_M": bytes]}"""
     charts = {}
-    daily_df = None
+    df_by_interval: dict = {}
     for interval, limit in [("D", 400), ("W", 260), ("M", 60)]:
         try:
             df = load_candles(ticker, interval, limit=limit)
@@ -166,22 +167,26 @@ def _make_chart(ticker: str, name: str) -> dict:
                 charts[interval] = generate_chart(
                     df, ticker, name, config.INDICATOR_CONFIG, interval=interval
                 )
-                if interval == "D":
-                    daily_df = df
+                df_by_interval[interval] = df
         except Exception as e:
             lbl = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
             print(f"  [WARN] {ticker} {lbl} 차트 생성 실패: {e}")
 
-    # 엘리엇 차트는 일봉이 있고 5파가 검출됐을 때만 생성 (PoC)
-    if daily_df is not None:
+    # 엘리엇 차트는 인터벌별로 각각 검출 시도. 인터벌별 임계값은 ELLIOTT_CONFIG_OVERRIDES.
+    # 결과 키: D → "E", W → "E_W", M → "E_M".
+    elliott_key = {"D": "E", "W": "E_W", "M": "E_M"}
+    for interval, df in df_by_interval.items():
         try:
-            elliott = compute_elliott_wave(daily_df, config.ELLIOTT_CONFIG)
-            if elliott.get("available"):
-                img = generate_elliott_chart(daily_df, ticker, name, elliott)
-                if img:
-                    charts["E"] = img
+            ec = config.get_elliott_config(interval)
+            elliott = compute_elliott_wave(df, ec)
+            if not elliott.get("available"):
+                continue
+            img = generate_elliott_chart(df, ticker, name, elliott, interval=interval)
+            if img:
+                charts[elliott_key[interval]] = img
         except Exception as e:
-            print(f"  [WARN] {ticker} 엘리엇 차트 생성 실패: {e}")
+            lbl = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
+            print(f"  [WARN] {ticker} 엘리엇 {lbl} 차트 생성 실패: {e}")
 
     return charts
 
@@ -429,6 +434,67 @@ def _fetch_news_for_block(name: str, items: list[str], max_per_disclosure: int =
     return collected
 
 
+# SEC 양식별 영문 뉴스 검색어 보조어. ticker 와 함께 결합해 검색.
+_SEC_FORM_QUERY_TERMS = {
+    "10-K":    "annual report",
+    "10-Q":    "earnings results",
+    "8-K":     "",                 # 일반 사건 — ticker 만으로 최근 뉴스 잡힘
+    "SC 13D":  "stake",
+    "SC 13G":  "stake",
+    "DEF 14A": "shareholder",
+    "S-1":     "offering",
+}
+
+
+def _should_fetch_us_news(line: str) -> bool:
+    """SEC 공시 라인이 영문 뉴스 보강 대상인지 판단.
+    - 🔴/🟠 중요도 → 항상 포함
+    - 핵심 양식 (8-K / 10-Q / 10-K / S-1) → 포함
+    """
+    if not line:
+        return False
+    if "🔴" in line or "🟠" in line:
+        return True
+    return any(form in line for form in ("8-K", "10-Q", "10-K", "S-1", "SC 13"))
+
+
+def _us_news_query(ticker: str, line: str) -> str:
+    """SEC 공시 라인 → ticker + 검색 보조어.
+    우선순위: [item_label] (8-K) > 양식별 보조어 > "news" 폴백.
+    ticker 단독으로 검색하면 Yahoo Finance/Seeking Alpha 등 시세 페이지만 잡혀
+    의미 있는 뉴스가 안 나옴 — 보조어를 강제로 한 단어 이상 붙임.
+    """
+    import re
+    m = re.search(r"\[([^\]]+)\]", line)
+    if m:
+        return f"{ticker} {m.group(1).lower().strip()}"
+    for form, term in _SEC_FORM_QUERY_TERMS.items():
+        if form in line and term:
+            return f"{ticker} {term}"
+    return f"{ticker} news"
+
+
+def _fetch_news_for_us_block(ticker: str, items: list[str]) -> list[dict]:
+    """미국 SEC 공시 보강용 영문 뉴스. 첫 should-fetch 라인의 양식으로 검색.
+    market_warning 의 hybrid (Serper.dev → Google News RSS) 를 재사용.
+    """
+    if not any(_should_fetch_us_news(ln) for ln in items):
+        return []
+    # 첫 매치 라인만 검색 — 종목당 한 카테고리로 충분
+    query = ticker
+    for ln in items:
+        if _should_fetch_us_news(ln):
+            query = _us_news_query(ticker, ln)
+            break
+    from market_warning import fetch_news_snippets
+    hits = fetch_news_snippets(query, limit=3, days=2)
+    # 모닝 브리핑 렌더링은 'title' + 'link' 키만 사용 — 호환되게 매핑
+    return [
+        {"title": h.get("title", ""), "link": h.get("link", "")}
+        for h in hits if h.get("title") and h.get("link")
+    ][:2]
+
+
 def run_morning_brief():
     """월~금 07:30 — 미국 포트폴리오 가격·SEC 공시 업데이트 + 한국 DART
     공시 수집 → 당일+T-3 캘린더일치 공시를 규칙 기반 목록 + LLM 한줄 요약
@@ -463,10 +529,12 @@ def run_morning_brief():
                 )
                 us_lines.append(f"─── {name}({t}) ───\n{summary}")
                 items = _format_summary_lines(summary)
-                # SEC 공시는 영문·티커 기반이라 네이버 뉴스 매칭 효과 낮음 → 스킵
+                # SEC 공시 → ticker + 양식 키워드로 영문 뉴스 매칭
+                # (Serper.dev hybrid 사용, Google News RSS 폴백)
+                news = _fetch_news_for_us_block(t, items) if items else []
                 blocks_for_llm.append({
                     "ticker": t, "name": name, "market": "US",
-                    "items": items, "news": [],
+                    "items": items, "news": news,
                 })
             sections.append(us_lines)
 
