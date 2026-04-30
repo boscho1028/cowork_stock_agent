@@ -658,6 +658,18 @@ def _build_supply_summary(kr_tickers: list) -> str:
     return "\n".join(lines) if had_data else ""
 
 
+def run_universe_signal_scan():
+    """매일 universe 전체 시그널 스캔 → 발동 종목만 텔레그램 별도 메시지.
+    포함 시그널: RSI/MACD/일목/MA10주봉/캔들반전/거래량급증/MA5풀백/공시.
+    발동 0건이면 '발동 시그널 없음' 한 줄로 발송.
+    """
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [SIGNAL] universe 자동 스캔 시작")
+    try:
+        cmd_signals(tickers=None)  # universe 전체 스캔 (cmd_update 자체 포함)
+    except Exception as e:
+        _notify_batch_error("시그널 스캔", e)
+
+
 def run_kr_evening():
     """월~금 17:00 — 한국 장 마감 후 국내 포트폴리오 가격·공시 업데이트 +
     universe 전체 외국인·기관 수급 수집 + portfolio AI 분석 + 차트 전송.
@@ -732,12 +744,14 @@ if __name__ == "__main__":
         print(f"스케줄 모드 | 주중(월~금) "
               f"{config.MARKET_WARNING_TIME} 시장경고, "
               f"{config.MORNING_BRIEF_TIME} 모닝브리핑, "
-              f"{config.EVENING_ANALYZE_TIME} 저녁분석")
+              f"{config.EVENING_ANALYZE_TIME} 저녁분석, "
+              f"{config.SIGNAL_SCAN_TIME} 시그널스캔")
         print("Ctrl+C 로 종료\n")
         for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
             getattr(schedule.every(), day).at(config.MARKET_WARNING_TIME).do(run_market_warning)
             getattr(schedule.every(), day).at(config.MORNING_BRIEF_TIME).do(run_morning_brief)
             getattr(schedule.every(), day).at(config.EVENING_ANALYZE_TIME).do(run_kr_evening)
+            getattr(schedule.every(), day).at(config.SIGNAL_SCAN_TIME).do(run_universe_signal_scan)
         while True:
             schedule.run_pending()
             time.sleep(30)

@@ -209,6 +209,39 @@ def _signal_volume_spike(ticker, name, daily, ind_cfg, sig_cfg) -> List[Signal]:
     return []
 
 
+def _signal_ma5_pullback(ticker, name, daily, ind_cfg, sig_cfg) -> List[Signal]:
+    """5일선 풀백 진입 후보 — Round 4 backtest 검증 매매 룰.
+
+    gap_atr = (close - MA5) / ATR14 임계값:
+      ≥ 4.0 → STRONG 🔴 (검증된 sweet spot, n=27 mean +8.85% PF 8.77 p=0.006)
+      ≥ 3.0 → MODERATE 🟠 (보조 강도, 표본 多 mean 약함)
+      ≥ 2.0 → WATCH (노이즈 많아 시그널 제외, 분석 prompt 에만 표시)
+    """
+    from analyzer import compute_pullback_signal
+
+    sig = compute_pullback_signal(daily, ind_cfg)
+    level = sig.get("level")
+    if level not in ("STRONG", "MODERATE"):
+        return []
+
+    icon = sig.get("icon", "")
+    gap  = sig["gap_atr"]
+    wait = sig["entry_in"]
+    sl   = abs(ind_cfg.get("pullback_sl_pct", -10.0))
+    tp   = ind_cfg.get("pullback_tp_pct", 20.0)
+
+    if level == "STRONG":
+        priority = "🔴"
+        title    = f"{icon} MA5 풀백 STRONG (검증 sweet spot)"
+    else:
+        priority = "🟠"
+        title    = f"{icon} MA5 풀백 MODERATE (보조)"
+
+    detail = (f"gap {gap:+.2f} ATR · {wait}일 대기 후 진입 후보 · "
+              f"SL -{sl:.0f}% / TP +{tp:.0f}% / close<MA5 청산")
+    return [Signal(ticker, name, "ma5_pullback", title, detail, priority)]
+
+
 def _signal_disclosure(ticker, name, overseas) -> List[Signal]:
     """T-0/T-1 공시 중 🔴 급을 시그널로."""
     t1 = _t_minus_1_bday()
@@ -255,6 +288,7 @@ _RULES = {
     "ma10_weekly_break":      _signal_ma10_weekly_break,
     "candle_reversal":        _signal_candle_reversal,
     "volume_spike":           _signal_volume_spike,
+    "ma5_pullback":           _signal_ma5_pullback,
     # "disclosure" 는 따로 처리 (weekly 인자 없이)
 }
 
