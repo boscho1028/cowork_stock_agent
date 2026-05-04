@@ -808,19 +808,24 @@ RSI: {m.get('rsi_signal','N/A')}
 {disc}
 
 ─────────────────────────────────────────────────────────
-아래 형식으로 텔레그램 채널 메시지를 작성하세요 (이모지 포함, 1100자 이내).
-**모든 섹션은 필수**입니다. 길이 맞추려고 섹션을 누락하지 말고, 각 섹션 내용을 짧게 압축하세요.
+아래 형식으로 텔레그램 메시지를 작성하세요. **반드시 3개 블록으로 나누고**, 각 블록은
+지정된 마커 한 줄로 시작해야 합니다. 각 블록은 해당 차트의 caption으로 따로 발송되니
+**블록당 1000자 이내**로 압축하세요. 마커(===MONTHLY===, ===WEEKLY===, ===DAILY===)는
+변형·생략 금지, 정확히 그대로 출력.
 
-[REPORT] {name}({ticker}) [{market_tag}]
-💼 {qty:,}주 | 현재 {currency}{fp(curr)}{chg_str}
-
-🔭 큰그림(월봉)
+===MONTHLY===
+🔭 큰그림(월봉) — {name}({ticker}) {currency}{fp(curr)}{chg_str}
 · MA10: {{월봉 10선 상황 + 돌파 여부}}
 · 패턴: {{월봉 추세전환 신호}}
 
-[WEEKLY] 중기(주봉)
+===WEEKLY===
+[WEEKLY] 중기(주봉) — {name}({ticker}) {currency}{fp(curr)}{chg_str}
 · MA10: {{주봉 10선 상황 + 돌파 여부}}
 · 패턴: {{주봉 추세전환 신호}}
+
+===DAILY===
+[REPORT] {name}({ticker}) [{market_tag}]
+💼 {qty:,}주 | 현재 {currency}{fp(curr)}{chg_str}
 
 [SINGLE] 단기(일봉)
 · RSI: {{과매도 진입/탈출 여부}}

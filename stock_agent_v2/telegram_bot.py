@@ -2,9 +2,32 @@
 telegram_bot.py - 텔레그램 Bot API 전송
 채널 / 그룹 / 개인 모두 동작 (Chat ID만 변경)
 """
+import re
 import time
 import requests
 from datetime import datetime
+
+
+_BLOCK_MARKER_RE = re.compile(r'^={3}(MONTHLY|WEEKLY|DAILY)={3}\s*$', re.MULTILINE)
+
+
+def _split_analysis(text: str) -> dict:
+    """LLM 출력에서 ===MONTHLY=== / ===WEEKLY=== / ===DAILY=== 마커로
+    구분된 블록을 분리. 마커가 하나라도 없으면 빈 dict 반환 (호출자가 폴백 처리).
+    """
+    parts = _BLOCK_MARKER_RE.split(text)
+    # parts: ['<preamble>', 'MONTHLY', '<m>', 'WEEKLY', '<w>', 'DAILY', '<d>'] (순서 임의)
+    if len(parts) < 7:
+        return {}
+    blocks = {}
+    for i in range(1, len(parts) - 1, 2):
+        key = parts[i]
+        body = parts[i + 1].strip()
+        if body:
+            blocks[key] = body
+    if {"MONTHLY", "WEEKLY", "DAILY"} <= blocks.keys():
+        return blocks
+    return {}
 
 
 class TelegramNotifier:
@@ -88,12 +111,15 @@ class TelegramNotifier:
         return bool(data and data.get("ok"))
 
     # ── 일괄 전송 ─────────────────────────────────────────────────────
-    def send_batch(self, results: list, header: str = ""):
+    def send_batch(self, results: list, header: str = "", header_photo: bytes | None = None):
         """종목 리스트 일괄 전송.
-        순서: 일봉(D) → 주봉(W) → 월봉(M) → 엘리엇(E).
-        각 사진 사이 1.0초 대기 — 텔레그램 분당 한도(차트 위주 발송 시 ~30/분) 회피.
-        일봉 caption = AI 분석 텍스트. 일봉 발송이 실패하면 분석 텍스트만 별도 발송
-        (사용자가 분석 결과를 못 보는 사태 방지).
+        분석 텍스트는 ===MONTHLY=== / ===WEEKLY=== / ===DAILY=== 마커로 3분할되어
+        각각 월봉·주봉·일봉 차트의 caption 으로 따로 발송된다.
+        발송 순서: 일봉 → (엘리엇 일봉) → 주봉 → (엘리엇 주봉) → 월봉 → (엘리엇 월봉).
+        엘리엇 차트는 검출된 인터벌만 발송됨.
+        마커 분할이 실패하면 폴백: 일봉 차트에 전체 텍스트를 caption 으로 붙인다.
+        header_photo: 헤더 텍스트 직후 발송할 추가 이미지(예: 수급 차트). None 이면 스킵.
+        각 사진 사이 1.0초 대기 — 텔레그램 분당 한도 회피.
         """
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         prefix = f"{header}\n" if header else ""
@@ -104,40 +130,74 @@ class TelegramNotifier:
         )
         time.sleep(0.6)
 
+        if header_photo:
+            self.send_photo(header_photo)
+            time.sleep(1.0)
+
         for item in results:
             charts   = item.get("charts", {})
             analysis = item["analysis"]
             ticker   = item.get("ticker", "")
 
-            d_img      = charts.get("D")
-            d_caption  = analysis[:1024]
-            d_sent_ok  = False
+            blocks = _split_analysis(analysis)
 
-            # 일봉(D) 발송 시도 — caption 에 분석 텍스트
-            if d_img:
-                d_sent_ok = self.send_photo(d_img, caption=d_caption)
-                time.sleep(1.0)
+            if blocks:
+                # 정상 분할: D → E → W → E_W → M → E_M 순 (단기 → 큰 그림)
+                m_cap = blocks["MONTHLY"]
+                w_cap = blocks["WEEKLY"]
+                d_cap = blocks["DAILY"]
+                send_plan = [
+                    ("D",   d_cap),
+                    ("E",   f"[엘리엇 일봉] {ticker}"),
+                    ("W",   w_cap),
+                    ("E_W", f"[엘리엇 주봉] {ticker}"),
+                    ("M",   m_cap),
+                    ("E_M", f"[엘리엇 월봉] {ticker}"),
+                ]
+                d_sent_ok = False
+                for iv, caption in send_plan:
+                    img = charts.get(iv)
+                    if not img:
+                        # 차트 없는 인터벌은 caption 만이라도 텍스트로 발송 (M/W/D 만)
+                        if iv in ("M", "W", "D") and caption:
+                            self.send(caption)
+                            time.sleep(0.6)
+                            if iv == "D":
+                                d_sent_ok = True
+                        continue
+                    ok = self.send_photo(img, caption=caption)
+                    if iv == "D":
+                        d_sent_ok = ok
+                    time.sleep(1.0)
 
-            # 일봉 차트 자체가 없거나 발송이 실패했으면 분석 텍스트만이라도 보장
-            if not d_sent_ok:
-                self.send(analysis)
-                time.sleep(0.6)
+                # 일봉 발송 실패 → 일봉 블록 텍스트만이라도 보장
+                if not d_sent_ok:
+                    self.send(d_cap)
+                    time.sleep(0.6)
+            else:
+                # 폴백: 마커 분할 실패 (에러 메시지 / LLM 형식 위반 등)
+                d_img     = charts.get("D")
+                d_caption = analysis[:1024]
+                d_sent_ok = False
+                if d_img:
+                    d_sent_ok = self.send_photo(d_img, caption=d_caption)
+                    time.sleep(1.0)
+                if not d_sent_ok:
+                    self.send(analysis)
+                    time.sleep(0.6)
 
-            # 주봉/월봉 + 인터벌별 엘리엇 차트. 검출된 인터벌만 발송됨.
-            # 차트 짝(가격↔엘리엇)을 묶어 전송하면 텔레그램에서 보기 편하므로
-            # W → E_W → M → E_M → E(일봉 엘리엇) 순으로 정렬.
-            for iv, caption in [
-                ("W",   f"[주봉] {ticker}"),
-                ("E_W", f"[엘리엇 주봉] {ticker}"),
-                ("M",   f"[월봉] {ticker}"),
-                ("E_M", f"[엘리엇 월봉] {ticker}"),
-                ("E",   f"[엘리엇 일봉] {ticker}"),
-            ]:
-                img = charts.get(iv)
-                if not img:
-                    continue
-                self.send_photo(img, caption=caption)
-                time.sleep(1.0)
+                for iv, caption in [
+                    ("W",   f"[주봉] {ticker}"),
+                    ("E_W", f"[엘리엇 주봉] {ticker}"),
+                    ("M",   f"[월봉] {ticker}"),
+                    ("E_M", f"[엘리엇 월봉] {ticker}"),
+                    ("E",   f"[엘리엇 일봉] {ticker}"),
+                ]:
+                    img = charts.get(iv)
+                    if not img:
+                        continue
+                    self.send_photo(img, caption=caption)
+                    time.sleep(1.0)
 
             time.sleep(0.6)
 

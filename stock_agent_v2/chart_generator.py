@@ -68,6 +68,93 @@ _DEFAULTS = {
 }
 
 
+# ── 수급 동향 차트 ────────────────────────────────────────────────────
+def _fmt_amt_short(amt) -> str:
+    """백만원 → 사람이 읽기 좋은 단위 (조/억/백만), 부호 유지."""
+    if amt is None:
+        return "0"
+    sign = "+" if amt >= 0 else "-"
+    a = abs(int(amt))
+    if a >= 1_000_000:
+        return f"{sign}{a/1_000_000:.1f}조"
+    if a >= 100:
+        return f"{sign}{a/100:.0f}억"
+    return f"{sign}{a}백만"
+
+
+def generate_supply_chart(rows: list, asof: str = "") -> bytes | None:
+    """1M 외국인·기관 누적 순매수 그룹 가로막대.
+
+    rows: [(ticker, name, foreign_1m, inst_1m), ...] — 백만원 단위
+    asof: 차트 제목에 표시할 기준일 (예: '2026-05-04')
+    빈 입력이면 None 반환.
+    """
+    if not rows:
+        return None
+
+    # 1M 합계(외국인+기관) 큰 순 정렬 → 큰 매수가 위로
+    rows = sorted(rows, key=lambda r: (r[2] or 0) + (r[3] or 0), reverse=True)
+    labels  = [f"{r[1]} ({r[0]})" for r in rows]
+    foreign = [(r[2] or 0) for r in rows]
+    inst    = [(r[3] or 0) for r in rows]
+
+    n = len(rows)
+    fig_h = max(3.5, n * 0.55 + 1.4)
+    fig, ax = plt.subplots(figsize=(10.5, fig_h), facecolor=C["bg"])
+    ax.set_facecolor(C["panel"])
+
+    y = np.arange(n)
+    bar_h = 0.38
+    bars_f = ax.barh(y - bar_h / 2, foreign, height=bar_h,
+                     color="#42a5f5", edgecolor="none", label="외국인")
+    bars_i = ax.barh(y + bar_h / 2, inst, height=bar_h,
+                     color="#ffa726", edgecolor="none", label="기관")
+
+    # 막대 끝에 값 라벨
+    max_abs = max((abs(v) for v in foreign + inst), default=1) or 1
+    pad = max_abs * 0.015
+    for bars, vals in [(bars_f, foreign), (bars_i, inst)]:
+        for bar, v in zip(bars, vals):
+            if v == 0:
+                continue
+            x  = v + (pad if v > 0 else -pad)
+            ha = "left" if v > 0 else "right"
+            ax.text(x, bar.get_y() + bar.get_height() / 2,
+                    _fmt_amt_short(v), va="center", ha=ha,
+                    color=C["text"], fontsize=9)
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, color=C["text"])
+    ax.invert_yaxis()
+    ax.axvline(0, color=C["subtext"], linewidth=0.8)
+    ax.spines[["top", "right"]].set_visible(False)
+    for s in ("left", "bottom"):
+        ax.spines[s].set_color(C["subtext"])
+    ax.grid(axis="x", color=C["grid"], linewidth=0.5, alpha=0.6)
+
+    # x ticks 비활성 (값 라벨로 충분, 단위 혼동 방지)
+    ax.set_xticks([])
+    ax.tick_params(axis="x", colors=C["subtext"])
+
+    title = "수급 동향 (1M 외국인·기관 누적 순매수)"
+    if asof:
+        title += f"  · {asof} 기준"
+    ax.set_title(title, color=C["text"], fontsize=12, loc="left", pad=10)
+    ax.legend(loc="lower right", facecolor=C["panel"],
+              edgecolor=C["grid"], labelcolor=C["text"], fontsize=9)
+
+    # 막대 끝 라벨이 잘리지 않도록 x 축에 여유 추가
+    xmin = min(foreign + inst + [0]) - max_abs * 0.18
+    xmax = max(foreign + inst + [0]) + max_abs * 0.18
+    ax.set_xlim(xmin, xmax)
+
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=C["bg"], dpi=140)
+    plt.close(fig)
+    return buf.getvalue()
+
+
 def generate_chart(
     df_daily:  pd.DataFrame,
     ticker:    str,

@@ -191,10 +191,11 @@ def _make_chart(ticker: str, name: str) -> dict:
     return charts
 
 
-def cmd_analyze(tickers=None, header="", primary=None):
+def cmd_analyze(tickers=None, header="", primary=None, header_photo=None):
     """
     분석 실행 + 텔레그램 채널 전송
     primary: 'claude' | 'gemini' | None(config.AI_PRIMARY 따름)
+    header_photo: 헤더 텍스트 직후 발송할 추가 이미지(예: 수급 차트). None 이면 생략.
 
     에러 처리 방침:
     - 정상 종목: 분석 결과 전송
@@ -257,7 +258,7 @@ def cmd_analyze(tickers=None, header="", primary=None):
         all_results.append({"ticker": r["ticker"], "analysis": err_msg})
 
     if all_results:
-        notifier.send_batch(all_results, header=full_header)
+        notifier.send_batch(all_results, header=full_header, header_photo=header_photo)
 
     for r in ok_results:
         mark_sent(r["ticker"])
@@ -618,6 +619,33 @@ def _fmt_amt_mkrw(v_mil_krw: int) -> str:
     return f"{sign}{a}백만"
 
 
+def _build_supply_chart(kr_tickers: list):
+    """portfolio 국내 종목별 1M 외국인·기관 누적 순매수 차트 (PNG bytes).
+    DB 데이터 없는 종목은 스킵. 데이터가 하나도 없으면 None.
+    """
+    from database import load_investor_trend
+    from chart_generator import generate_supply_chart
+
+    rows_data = []
+    asof = ""
+    for t in kr_tickers:
+        rows = load_investor_trend(t, days=20)
+        if not rows:
+            continue
+        if not asof:
+            asof = rows[0]["trade_date"]
+        f_sum = sum((r.get("foreign_amt") or 0) for r in rows[:20])
+        i_sum = sum((r.get("inst_amt")    or 0) for r in rows[:20])
+        info = (config.get_portfolio_detail().get(t)
+             or config.get_universe_detail().get(t)
+             or {})
+        name = info.get("name", t)
+        rows_data.append((t, name, f_sum, i_sum))
+    if not rows_data:
+        return None
+    return generate_supply_chart(rows_data, asof=asof)
+
+
 def _build_supply_summary(kr_tickers: list) -> str:
     """portfolio 국내 종목별 외국인·기관 수급 요약 (저녁 분석 헤더용).
     DB 에 데이터 없는 종목은 스킵. 반환: 멀티라인 문자열.
@@ -693,14 +721,15 @@ def run_kr_evening():
         except Exception as e:
             print(f"[INVESTOR] 수급 수집 중단 (저녁 분석은 계속 진행): {e}")
 
-        supply = _build_supply_summary(kr_tickers)
+        supply       = _build_supply_summary(kr_tickers)
+        supply_chart = _build_supply_chart(kr_tickers)
         header = (f"[REPORT] AI 주식 전략 | "
                   f"{datetime.now().strftime('%m/%d')} "
                   f"{config.EVENING_ANALYZE_TIME}")
         if supply:
             header = f"{header}\n\n{supply}"
 
-        cmd_analyze(tickers=kr_tickers, header=header)
+        cmd_analyze(tickers=kr_tickers, header=header, header_photo=supply_chart)
     except Exception as e:
         _notify_batch_error("한국 저녁 분석", e)
 
