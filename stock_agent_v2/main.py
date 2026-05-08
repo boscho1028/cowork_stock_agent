@@ -687,8 +687,11 @@ def _fmt_amt_mkrw(v_mil_krw: int) -> str:
     return f"{sign}{a}백만"
 
 
+_SUPPLY_PERIOD_DAYS = (("1D", 1), ("3D", 3), ("1W", 5), ("1M", 20))
+
+
 def _build_supply_chart(kr_tickers: list):
-    """portfolio 국내 종목별 1M 외국인·기관 누적 순매수 차트 (PNG bytes).
+    """portfolio 국내 종목별 1D/3D/1W/1M 외국인·기관 누적 순매수 차트 (PNG bytes).
     DB 데이터 없는 종목은 스킵. 데이터가 하나도 없으면 None.
     """
     from database import load_investor_trend
@@ -702,13 +705,16 @@ def _build_supply_chart(kr_tickers: list):
             continue
         if not asof:
             asof = rows[0]["trade_date"]
-        f_sum = sum((r.get("foreign_amt") or 0) for r in rows[:20])
-        i_sum = sum((r.get("inst_amt")    or 0) for r in rows[:20])
+        periods = {}
+        for lbl, n in _SUPPLY_PERIOD_DAYS:
+            f_sum = sum((r.get("foreign_amt") or 0) for r in rows[:n])
+            i_sum = sum((r.get("inst_amt")    or 0) for r in rows[:n])
+            periods[lbl] = (f_sum, i_sum)
         info = (config.get_portfolio_detail().get(t)
              or config.get_universe_detail().get(t)
              or {})
         name = info.get("name", t)
-        rows_data.append((t, name, f_sum, i_sum))
+        rows_data.append((t, name, periods))
     if not rows_data:
         return None
     return generate_supply_chart(rows_data, asof=asof)

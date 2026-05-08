@@ -82,73 +82,85 @@ def _fmt_amt_short(amt) -> str:
     return f"{sign}{a}백만"
 
 
-def generate_supply_chart(rows: list, asof: str = "") -> bytes | None:
-    """1M 외국인·기관 누적 순매수 그룹 가로막대.
+SUPPLY_PERIODS = ("1D", "3D", "1W", "1M")
 
-    rows: [(ticker, name, foreign_1m, inst_1m), ...] — 백만원 단위
-    asof: 차트 제목에 표시할 기준일 (예: '2026-05-04')
-    빈 입력이면 None 반환.
+
+def generate_supply_chart(rows: list, asof: str = "") -> bytes | None:
+    """외국인·기관 누적 순매수 — 1D/3D/1W/1M 2×2 그리드 가로막대.
+
+    rows: [(ticker, name, periods), ...]
+        periods: {"1D": (foreign, inst), "3D": ..., "1W": ..., "1M": ...}
+        금액은 백만원 단위.
+    asof: 차트 제목에 표시할 기준일.
+    빈 입력이면 None.
     """
     if not rows:
         return None
 
-    # 1M 합계(외국인+기관) 큰 순 정렬 → 큰 매수가 위로
-    rows = sorted(rows, key=lambda r: (r[2] or 0) + (r[3] or 0), reverse=True)
-    labels  = [f"{r[1]} ({r[0]})" for r in rows]
-    foreign = [(r[2] or 0) for r in rows]
-    inst    = [(r[3] or 0) for r in rows]
-
+    # 1M 합계 큰 순 — 모든 패널에서 같은 행 순서를 유지해 시선 이동을 단순화.
+    rows = sorted(
+        rows,
+        key=lambda r: (r[2].get("1M", (0, 0))[0] or 0)
+                    + (r[2].get("1M", (0, 0))[1] or 0),
+        reverse=True,
+    )
+    labels = [f"{r[1]} ({r[0]})" for r in rows]
     n = len(rows)
-    fig_h = max(3.5, n * 0.55 + 1.4)
-    fig, ax = plt.subplots(figsize=(10.5, fig_h), facecolor=C["bg"])
-    ax.set_facecolor(C["panel"])
 
+    # 4개 패널 공용 x-범위 — 1D vs 1M 의 절대 크기 비교 가능하게.
+    all_vals = [v for _, _, p in rows for f, i in p.values()
+                for v in (f or 0, i or 0)]
+    max_abs = max((abs(v) for v in all_vals), default=1) or 1
+    pad = max_abs * 0.015
+
+    fig_h = max(4.0, n * 0.45 + 1.6)
+    fig, axes = plt.subplots(2, 2, figsize=(13.5, fig_h),
+                             sharey=True, facecolor=C["bg"])
     y = np.arange(n)
     bar_h = 0.38
-    bars_f = ax.barh(y - bar_h / 2, foreign, height=bar_h,
-                     color="#42a5f5", edgecolor="none", label="외국인")
-    bars_i = ax.barh(y + bar_h / 2, inst, height=bar_h,
-                     color="#ffa726", edgecolor="none", label="기관")
 
-    # 막대 끝에 값 라벨
-    max_abs = max((abs(v) for v in foreign + inst), default=1) or 1
-    pad = max_abs * 0.015
-    for bars, vals in [(bars_f, foreign), (bars_i, inst)]:
-        for bar, v in zip(bars, vals):
-            if v == 0:
-                continue
-            x  = v + (pad if v > 0 else -pad)
-            ha = "left" if v > 0 else "right"
-            ax.text(x, bar.get_y() + bar.get_height() / 2,
-                    _fmt_amt_short(v), va="center", ha=ha,
-                    color=C["text"], fontsize=9)
+    for ax, lbl in zip(axes.flat, SUPPLY_PERIODS):
+        ax.set_facecolor(C["panel"])
+        foreign = [(r[2].get(lbl, (0, 0))[0] or 0) for r in rows]
+        inst    = [(r[2].get(lbl, (0, 0))[1] or 0) for r in rows]
 
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels, color=C["text"])
-    ax.invert_yaxis()
-    ax.axvline(0, color=C["subtext"], linewidth=0.8)
-    ax.spines[["top", "right"]].set_visible(False)
-    for s in ("left", "bottom"):
-        ax.spines[s].set_color(C["subtext"])
-    ax.grid(axis="x", color=C["grid"], linewidth=0.5, alpha=0.6)
+        bars_f = ax.barh(y - bar_h / 2, foreign, height=bar_h,
+                         color="#42a5f5", edgecolor="none", label="외국인")
+        bars_i = ax.barh(y + bar_h / 2, inst, height=bar_h,
+                         color="#ffa726", edgecolor="none", label="기관")
 
-    # x ticks 비활성 (값 라벨로 충분, 단위 혼동 방지)
-    ax.set_xticks([])
-    ax.tick_params(axis="x", colors=C["subtext"])
+        for bars, vals in [(bars_f, foreign), (bars_i, inst)]:
+            for bar, v in zip(bars, vals):
+                if v == 0:
+                    continue
+                x  = v + (pad if v > 0 else -pad)
+                ha = "left" if v > 0 else "right"
+                ax.text(x, bar.get_y() + bar.get_height() / 2,
+                        _fmt_amt_short(v), va="center", ha=ha,
+                        color=C["text"], fontsize=8)
 
-    title = "수급 동향 (1M 외국인·기관 누적 순매수)"
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels, color=C["text"])
+        ax.invert_yaxis()
+        ax.axvline(0, color=C["subtext"], linewidth=0.8)
+        ax.spines[["top", "right"]].set_visible(False)
+        for s in ("left", "bottom"):
+            ax.spines[s].set_color(C["subtext"])
+        ax.grid(axis="x", color=C["grid"], linewidth=0.5, alpha=0.6)
+        ax.set_xticks([])
+        ax.tick_params(axis="x", colors=C["subtext"])
+        ax.set_xlim(-max_abs * 1.18, max_abs * 1.18)
+        ax.set_title(lbl, color=C["text"], fontsize=11, loc="left", pad=6)
+
+    axes[0][0].legend(loc="lower right", facecolor=C["panel"],
+                      edgecolor=C["grid"], labelcolor=C["text"], fontsize=8)
+
+    sup_title = "수급 동향 (외국인·기관 누적 순매수)"
     if asof:
-        title += f"  · {asof} 기준"
-    ax.set_title(title, color=C["text"], fontsize=12, loc="left", pad=10)
-    ax.legend(loc="lower right", facecolor=C["panel"],
-              edgecolor=C["grid"], labelcolor=C["text"], fontsize=9)
+        sup_title += f"  ·  {asof} 기준"
+    fig.suptitle(sup_title, color=C["text"], fontsize=12, x=0.06, ha="left")
 
-    # 막대 끝 라벨이 잘리지 않도록 x 축에 여유 추가
-    xmin = min(foreign + inst + [0]) - max_abs * 0.18
-    xmax = max(foreign + inst + [0]) + max_abs * 0.18
-    ax.set_xlim(xmin, xmax)
-
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
     buf = io.BytesIO()
     fig.savefig(buf, format="png", facecolor=C["bg"], dpi=140)
     plt.close(fig)
