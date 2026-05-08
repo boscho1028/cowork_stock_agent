@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}공시 — Stock Agent{% endblock %}
+{% block content %}
+<h1>공시 (DART · SEC)</h1>
+<p class="muted">최근 14일 · {{ items|length }}건</p>
+
+{% if not items %}
+  <p class="empty">최근 공시가 없습니다.</p>
+{% else %}
+<ul class="filing-list">
+  {% for it in items %}
+    <li class="src-{{ it.source }}">
+      <div class="row1">
+        <span class="src">{{ it.source }}</span>
+        <span class="ticker">{{ it.ticker }}</span>
+        {% if it.name %}<span class="name">{{ it.name }}</span>{% endif %}
+        <span class="date">{{ it.date }}</span>
+      </div>
+      <div class="row2">
+        {% if it.url %}
+          <a href="{{ it.url }}" target="_blank" rel="noreferrer noopener">{{ it.title }} ↗</a>
+        {% else %}
+          {{ it.title }}
+        {% endif %}
+      </div>
+      {% if it.extra %}<div class="extra muted">{{ it.extra }}</div>{% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

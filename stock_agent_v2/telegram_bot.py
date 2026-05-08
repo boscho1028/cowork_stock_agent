@@ -204,6 +204,22 @@ class TelegramNotifier:
     def send_error(self, msg: str):
         self.send(f"🚨 오류 알림\n{msg}\n🕐 {datetime.now().strftime('%H:%M:%S')}")
 
+    # ── 한 줄 알림 (웹사이트 링크) ────────────────────────────────────
+    def send_brief(self, summary: str, web_url: str | None = None,
+                   path: str = "/reports") -> bool:
+        """'새 분석 N건 → URL' 형태 한 줄 알림.
+        WEB_ONLY 모드일 때 send/send_batch 대신 사용.
+        web_url 미지정 시 환경변수 WEB_URL 폴백.
+        """
+        import os as _os
+        url = web_url or _os.getenv("WEB_URL", "")
+        if url:
+            url = url.rstrip("/") + path
+            text = f"{summary}\n→ {url}"
+        else:
+            text = summary
+        return self.send(text)
+
     @staticmethod
     def _split(text: str, n: int = 4096) -> list:
         chunks = []

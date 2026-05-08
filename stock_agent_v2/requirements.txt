@@ -17,3 +17,11 @@ libsql>=0.1.11             # Turso / libSQL 파이썬 바인딩 (로컬 replica 
 # ── 유틸 ────────────────────────────────────────────────────────
 schedule>=1.2.0            # main.py 일일 배치 스케줄
 python-dotenv>=1.0.0       # .env 로더
+
+# ── 웹 (web/ 디렉토리, 친구와 결과 공유) ─────────────────────────
+fastapi>=0.110.0           # 웹 프레임워크
+uvicorn[standard]>=0.27.0  # ASGI 서버
+jinja2>=3.1.0              # 템플릿
+python-multipart>=0.0.9    # 로그인 폼
+bcrypt>=4.0.0              # 비번 해시 (sha256 prehash 로 72바이트 제한 우회)
+itsdangerous>=2.1.0        # 세션 쿠키 서명

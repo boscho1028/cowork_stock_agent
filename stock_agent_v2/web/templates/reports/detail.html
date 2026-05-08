@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ rec.ticker if rec else "분석 없음" }} — Stock Agent{% endblock %}
+{% block content %}
+{% if not rec %}
+  <p class="empty">해당 분석을 찾을 수 없습니다.</p>
+  <p><a href="/reports">← 목록으로</a></p>
+{% else %}
+<a class="back" href="/reports">← 목록</a>
+<h1>{{ rec.ticker }}</h1>
+<p class="muted">{{ rec.analyzed_at }}</p>
+
+{% set tf = {} %}
+{% for s in sections %}
+  {% set _ = tf.update({s.key: s}) %}
+{% endfor %}
+
+{# 항상 월 → 주 → 일 순으로 3섹션. 좌(텍스트) / 우(차트) 좌우 분할.
+   차트는 chart_files 우선, 없으면 /charts/live/ 폴백. #}
+{% for iv, icon, label in [
+    ("M", "📅", "월봉 (장기)"),
+    ("W", "📊", "주봉 (중기)"),
+    ("D", "📈", "일봉 (단기)"),
+] %}
+  {% set s = tf.get(iv) %}
+  <section class="tf-block">
+    <h2>{{ icon }} {{ label }}</h2>
+    <div class="layout">
+      <div class="text-side">
+        {% if s and s.text %}
+          <pre class="report-body">{{ s.text }}</pre>
+        {% else %}
+          <p class="muted small">텍스트 없음</p>
+        {% endif %}
+      </div>
+      <div class="charts">
+        {% set chart_url = (s.chart_url if s and s.chart_url else "/charts/live/" ~ rec.ticker ~ "/" ~ iv) %}
+        <figure>
+          <figcaption>{{ rec.ticker }} · {{ label }}</figcaption>
+          <img src="{{ chart_url }}" alt="{{ rec.ticker }} {{ iv }}" loading="eager" />
+        </figure>
+        {% if s and s.elliott_url %}
+          <figure>
+            <figcaption>엘리엇 파동 ({{ label }})</figcaption>
+            <img src="{{ s.elliott_url }}" alt="{{ rec.ticker }} elliott {{ iv }}" loading="eager" />
+          </figure>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+{% endfor %}
+
+{% if fallback_text %}
+  <section class="tf-block fallback">
+    <h2>📝 분석 본문</h2>
+    <div class="layout">
+      <pre class="report-body">{{ fallback_text }}</pre>
+    </div>
+  </section>
+{% endif %}
+{% endif %}
+{% endblock %}

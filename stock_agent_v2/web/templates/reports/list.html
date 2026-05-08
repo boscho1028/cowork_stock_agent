@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}분석 — Stock Agent{% endblock %}
+{% block content %}
+<h1>분석 리포트</h1>
+
+<div class="filter-bar">
+  <input id="search" type="search" placeholder="종목 검색 (티커·종목명)" autocomplete="off" />
+  <div class="tabs">
+    <button class="tab active" data-market="all">전체 <span class="cnt">{{ grid.kr|length + grid.us|length }}</span></button>
+    <button class="tab" data-market="kr">🇰🇷 국내 <span class="cnt">{{ grid.kr|length }}</span></button>
+    <button class="tab" data-market="us">🇺🇸 해외 <span class="cnt">{{ grid.us|length }}</span></button>
+  </div>
+</div>
+
+{% macro render_card(c) %}
+  {# data-search: ticker + name(소문자) 합쳐 검색 매칭 #}
+  {% set search = (c.ticker ~ ' ' ~ c.name)|lower %}
+  {% if c.latest_id %}
+    <a class="ticker-card has-analysis" data-search="{{ search }}" href="/reports/{{ c.latest_id }}">
+  {% else %}
+    <div class="ticker-card no-analysis" data-search="{{ search }}">
+  {% endif %}
+    <div class="row1">
+      <span class="ticker">
+        {% if c.is_portfolio %}<span class="star" title="포트폴리오">⭐</span>{% endif %}
+        {{ c.ticker }}
+      </span>
+      <span class="name">{{ c.name }}</span>
+    </div>
+    <div class="row2">
+      {% if c.latest_at %}
+        <span class="when">{{ c.latest_at[:16] }}</span>
+      {% else %}
+        <span class="when muted">분석 없음</span>
+      {% endif %}
+    </div>
+  {% if c.latest_id %}</a>{% else %}</div>{% endif %}
+{% endmacro %}
+
+<section class="market-block" data-market="kr">
+  <h2>🇰🇷 국내 <span class="muted small">· {{ grid.kr|length }}종목</span></h2>
+  {% if not grid.kr %}
+    <p class="empty">국내 종목 없음.</p>
+  {% else %}
+    <div class="ticker-grid">
+      {% for c in grid.kr %}{{ render_card(c) }}{% endfor %}
+    </div>
+    <p class="empty search-empty" style="display:none">검색 결과 없음.</p>
+  {% endif %}
+</section>
+
+<section class="market-block" data-market="us">
+  <h2>🇺🇸 해외 <span class="muted small">· {{ grid.us|length }}종목</span></h2>
+  {% if not grid.us %}
+    <p class="empty">해외 종목 없음.</p>
+  {% else %}
+    <div class="ticker-grid">
+      {% for c in grid.us %}{{ render_card(c) }}{% endfor %}
+    </div>
+    <p class="empty search-empty" style="display:none">검색 결과 없음.</p>
+  {% endif %}
+</section>
+
+<script src="/static/js/list.js" defer></script>
+{% endblock %}

@@ -349,8 +349,17 @@ def build_warning_message() -> str:
 
 def run_market_warning() -> None:
     """매일 07:30 (KST) 트리거되는 메인 함수."""
+    from database import save_market_warning
+
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [WARNING] 시장 경고 브리핑 시작")
+    fg_score: float | None = None
+    fg_rating: str | None = None
     try:
+        # 본문과 별개로 F&G 수치 한 번 더 빠르게 — 실패해도 본문엔 영향 없음
+        fg = fetch_fear_greed()
+        if fg.get("available"):
+            fg_score  = fg.get("score")
+            fg_rating = fg.get("rating")
         msg = build_warning_message()
     except Exception as e:
         print(f"[WARNING] 빌드 실패: {type(e).__name__}: {e}")
@@ -359,8 +368,26 @@ def run_market_warning() -> None:
             f"⚠️ 시장 경고 브리핑 생성 실패\n"
             f"{type(e).__name__}: {str(e)[:200]}"
         )
+
+    # 웹용 영속화 — 실패해도 텔레그램 전송은 진행
+    try:
+        kst = pytz.timezone("Asia/Seoul")
+        save_market_warning(
+            asof=datetime.now(kst).strftime("%Y-%m-%d %H:%M"),
+            body=msg,
+            fg_score=fg_score,
+            fg_rating=fg_rating,
+        )
+    except Exception as e:
+        print(f"[WARNING] DB 저장 실패: {e}")
+
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
-    notifier.send(msg)
+    if os.getenv("WEB_ONLY") == "1":
+        fg_part = (f" · F&G {fg_score} ({fg_rating})"
+                   if fg_score is not None else "")
+        notifier.send_brief(f"📊 시장 경고 브리핑{fg_part}", path="/warnings")
+    else:
+        notifier.send(msg)
     print("[WARNING] 전송 완료")
 
 

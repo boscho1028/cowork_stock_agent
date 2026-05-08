@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}시그널 — Stock Agent{% endblock %}
+{% block content %}
+<h1>시그널 스캔</h1>
+<p class="muted">최근 30일</p>
+
+{% if not groups %}
+  <p class="empty">최근 발동된 시그널이 없습니다.</p>
+{% else %}
+  {% for g in groups %}
+    <section class="day-block">
+      <h2>{{ g.scan_date }} <span class="muted">· {{ g.items|length }}건</span></h2>
+      <ul class="signal-list">
+        {% for s in g.items %}
+          <li class="prio-{{ s.priority }}">
+            <div class="row1">
+              <span class="prio">{{ s.priority }}</span>
+              <span class="ticker">{{ s.ticker }}</span>
+              <span class="name">{{ s.name or "" }}</span>
+            </div>
+            <div class="row2"><strong>{{ s.title }}</strong> — {{ s.detail }}</div>
+            <div class="rule muted">rule: {{ s.rule }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endfor %}
+{% endif %}
+{% endblock %}

@@ -194,6 +194,52 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_investor_ticker_date
             ON investor_trend(ticker, trade_date DESC);
+
+        -- ── 웹 사용자 (나/친구 공유용) ──────────────────────────────
+        CREATE TABLE IF NOT EXISTS users (
+            username      TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            display_name  TEXT,
+            created_at    TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        -- ── 시그널 로그 (run_signals.py 가 적재) ───────────────────
+        -- payload_json: Signal dataclass 직렬화 (rule, title, detail, priority)
+        CREATE TABLE IF NOT EXISTS signals (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_date    TEXT NOT NULL,           -- YYYY-MM-DD
+            ticker       TEXT NOT NULL,
+            name         TEXT,
+            rule         TEXT NOT NULL,
+            title        TEXT,
+            detail       TEXT,
+            priority     TEXT,                    -- 🔴/🟠/🟡
+            created_at   TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_signals_date
+            ON signals(scan_date DESC, ticker);
+
+        -- ── 시장 경고 브리핑 (run_market_warning.py) ───────────────
+        CREATE TABLE IF NOT EXISTS market_warnings (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            asof        TEXT NOT NULL,            -- YYYY-MM-DD HH:MM
+            body        TEXT NOT NULL,            -- LLM 출력 본문 (markdown)
+            fg_score    REAL,                    -- 추출되면 저장
+            fg_rating   TEXT,
+            created_at  TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_warnings_date
+            ON market_warnings(asof DESC);
+
+        -- ── 분석 차트 파일 메타 (실제 PNG는 data/charts/ 아래) ─────
+        CREATE TABLE IF NOT EXISTS chart_files (
+            analysis_id  INTEGER NOT NULL,
+            interval     TEXT NOT NULL,            -- D/W/M/E/E_W/E_M
+            file_path    TEXT NOT NULL,            -- 프로젝트 root 기준 상대경로
+            created_at   TEXT DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (analysis_id, interval),
+            FOREIGN KEY (analysis_id) REFERENCES analysis_log(id) ON DELETE CASCADE
+        );
         """)
         conn.commit()
         # 스키마 생성분을 클라우드로 push
@@ -419,12 +465,22 @@ def load_investor_trend(ticker: str, days: int = 30) -> list:
 
 # ── 분석 로그 ────────────────────────────────────────────────────────
 
-def save_analysis(ticker: str, result_text: str):
+def save_analysis(ticker: str, result_text: str) -> int:
+    """analysis_log 삽입 후 새 row의 id 반환 (chart_files 연결용)."""
     with get_conn(sync_after=True) as conn:
-        conn.execute("""
+        cur = conn.execute("""
             INSERT INTO analysis_log (ticker, analyzed_at, result_text)
             VALUES (?, datetime('now','localtime'), ?)
         """, (ticker, result_text))
+        # libsql / sqlite3 양쪽에서 lastrowid 동작
+        rid = cur.lastrowid
+        if rid is None:
+            row = conn.execute(
+                "SELECT id FROM analysis_log WHERE ticker=? ORDER BY id DESC LIMIT 1",
+                (ticker,),
+            ).fetchone()
+            rid = row[0] if row else 0
+    return int(rid)
 
 
 def mark_sent(ticker: str):
@@ -433,3 +489,206 @@ def mark_sent(ticker: str):
             UPDATE analysis_log SET sent_telegram=1
             WHERE ticker=? AND sent_telegram=0
         """, (ticker,))
+
+
+# ── 웹 사용자 ────────────────────────────────────────────────────────
+
+def upsert_user(username: str, password_hash: str, display_name: str | None = None):
+    """username PK 기준 upsert. 비번 변경 시도 동일 함수로."""
+    with get_conn(sync_after=True) as conn:
+        conn.execute("""
+            INSERT INTO users (username, password_hash, display_name)
+            VALUES (?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                password_hash = excluded.password_hash,
+                display_name  = COALESCE(excluded.display_name, users.display_name)
+        """, (username, password_hash, display_name))
+
+
+def load_user(username: str) -> dict | None:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT username, password_hash, display_name FROM users WHERE username=?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "username":      row[0],
+            "password_hash": row[1],
+            "display_name":  row[2] or row[0],
+        }
+
+
+# ── 시그널 로그 ──────────────────────────────────────────────────────
+
+def save_signals(scan_date: str, signals: list) -> int:
+    """signals: list[Signal dataclass-like]. (rule/title/detail/priority/ticker/name 속성)"""
+    if not signals:
+        return 0
+    rows = [
+        (scan_date, s.ticker, s.name, s.rule, s.title, s.detail, s.priority)
+        for s in signals
+    ]
+    with get_conn(sync_after=True) as conn:
+        conn.executemany("""
+            INSERT INTO signals (scan_date, ticker, name, rule, title, detail, priority)
+            VALUES (?,?,?,?,?,?,?)
+        """, rows)
+    return len(rows)
+
+
+def load_signals_grouped_by_date(limit_days: int = 30) -> list[dict]:
+    """최근 N일치 시그널 — 날짜별로 그룹핑된 리스트 반환.
+    반환: [{"scan_date": ..., "items": [{ticker,name,rule,title,detail,priority}, ...]}, ...]"""
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT scan_date, ticker, name, rule, title, detail, priority
+            FROM signals
+            WHERE scan_date >= date('now', ?)
+            ORDER BY scan_date DESC, priority ASC, ticker ASC
+        """, (f"-{int(limit_days)} days",))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    grouped: dict[str, list] = {}
+    for r in rows:
+        grouped.setdefault(r["scan_date"], []).append(r)
+    return [{"scan_date": d, "items": items} for d, items in grouped.items()]
+
+
+# ── 시장 경고 ────────────────────────────────────────────────────────
+
+def save_market_warning(asof: str, body: str, fg_score: float | None = None,
+                         fg_rating: str | None = None):
+    with get_conn(sync_after=True) as conn:
+        conn.execute("""
+            INSERT INTO market_warnings (asof, body, fg_score, fg_rating)
+            VALUES (?,?,?,?)
+        """, (asof, body, fg_score, fg_rating))
+
+
+def load_market_warnings(limit: int = 30) -> list[dict]:
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT id, asof, body, fg_score, fg_rating
+            FROM market_warnings
+            ORDER BY asof DESC LIMIT ?
+        """, (int(limit),))
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+# ── 분석 리포트 (웹용 조회) ──────────────────────────────────────────
+
+def list_analyses(limit: int = 200) -> list[dict]:
+    """최근 분석 리포트 목록. ticker별 최신부터."""
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT id, ticker, analyzed_at, substr(result_text, 1, 200) AS preview
+            FROM analysis_log
+            ORDER BY analyzed_at DESC
+            LIMIT ?
+        """, (int(limit),))
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def latest_analysis_per_ticker() -> dict[str, dict]:
+    """ticker → {id, analyzed_at, preview} (가장 최근 1건). 없으면 키 없음.
+    universe 종목 그리드에서 각 종목의 최신 분석 링크 만들 때 사용.
+    """
+    with get_conn() as conn:
+        # 각 ticker 의 max(analyzed_at) row 만 추출.
+        cur = conn.execute("""
+            SELECT a.ticker, a.id, a.analyzed_at,
+                   substr(a.result_text, 1, 160) AS preview
+            FROM analysis_log a
+            JOIN (
+                SELECT ticker, MAX(analyzed_at) AS m
+                FROM analysis_log
+                GROUP BY ticker
+            ) t ON t.ticker = a.ticker AND t.m = a.analyzed_at
+        """)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return {r["ticker"]: r for r in rows}
+
+
+def load_analysis(analysis_id: int) -> dict | None:
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT id, ticker, analyzed_at, result_text
+            FROM analysis_log WHERE id=?
+        """, (int(analysis_id),))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        rec = dict(zip(cols, row))
+        # 차트 파일 첨부
+        cur2 = conn.execute("""
+            SELECT interval, file_path FROM chart_files
+            WHERE analysis_id=? ORDER BY interval
+        """, (int(analysis_id),))
+        rec["charts"] = [
+            {"interval": r[0], "file_path": r[1]} for r in cur2.fetchall()
+        ]
+        return rec
+
+
+# ── 차트 파일 메타 ───────────────────────────────────────────────────
+
+def save_chart_files(analysis_id: int, charts: dict[str, str]):
+    """charts: {interval: file_path}. file_path 는 프로젝트 root 기준 상대경로 권장."""
+    if not charts:
+        return
+    rows = [(analysis_id, interval, path) for interval, path in charts.items()]
+    with get_conn(sync_after=True) as conn:
+        conn.executemany("""
+            INSERT OR REPLACE INTO chart_files (analysis_id, interval, file_path)
+            VALUES (?,?,?)
+        """, rows)
+
+
+def cleanup_old_charts(keep_days: int = 30) -> int:
+    """N일 이전 차트 파일 + chart_files 메타 + 빈 디렉토리 삭제. 삭제 파일 수 반환."""
+    from pathlib import Path
+    import datetime as _dt
+
+    cutoff = _dt.date.today() - _dt.timedelta(days=int(keep_days))
+    deleted = 0
+
+    # 1) 메타 + 파일 삭제
+    with get_conn(sync_after=True) as conn:
+        cur = conn.execute("""
+            SELECT cf.analysis_id, cf.interval, cf.file_path
+            FROM chart_files cf
+            JOIN analysis_log al ON al.id = cf.analysis_id
+            WHERE date(al.analyzed_at) < date(?)
+        """, (cutoff.isoformat(),))
+        rows = cur.fetchall()
+        for aid, interval, fpath in rows:
+            try:
+                p = Path(__file__).parent / fpath
+                if p.exists():
+                    p.unlink()
+                    deleted += 1
+            except Exception as e:
+                print(f"[charts] {fpath} 삭제 실패: {e}")
+            conn.execute(
+                "DELETE FROM chart_files WHERE analysis_id=? AND interval=?",
+                (aid, interval),
+            )
+
+    # 2) 빈 날짜 디렉토리 정리
+    charts_root = Path(__file__).parent / "data" / "charts"
+    if charts_root.exists():
+        for d in charts_root.iterdir():
+            if d.is_dir() and not any(d.iterdir()):
+                try:
+                    d.rmdir()
+                except Exception:
+                    pass
+
+    return deleted

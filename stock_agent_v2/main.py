@@ -84,7 +84,10 @@ _LOG_PATH = _setup_file_log()
 
 
 import config
-from database         import init_db, save_analysis, mark_sent, load_candles
+from database         import (
+    init_db, save_analysis, mark_sent, load_candles,
+    save_signals, save_chart_files, cleanup_old_charts, save_market_warning,
+)
 from kis_collector    import KISCollector          # KIS REST API
 from dart_collector   import DartCollector
 from sec_collector    import SECCollector
@@ -191,6 +194,32 @@ def _make_chart(ticker: str, name: str) -> dict:
     return charts
 
 
+def _persist_charts(analysis_id: int, ticker: str, charts: dict) -> None:
+    """차트 bytes 들을 data/charts/YYYYMMDD/ 아래에 저장하고 chart_files 메타 업데이트."""
+    if not charts:
+        return
+    today = datetime.now().strftime("%Y%m%d")
+    proj_root = Path(__file__).parent
+    out_dir = proj_root / "data" / "charts" / today
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    saved: dict[str, str] = {}
+    for interval, blob in charts.items():
+        if not blob:
+            continue
+        fname = f"{ticker}_{interval}.png"
+        fpath = out_dir / fname
+        try:
+            fpath.write_bytes(blob)
+            # 프로젝트 root 기준 상대경로 (POSIX 슬래시) — 웹에서 그대로 서빙
+            saved[interval] = str(fpath.relative_to(proj_root)).replace("\\", "/")
+        except Exception as e:
+            print(f"  [WARN] {ticker} {interval} 차트 저장 실패: {e}")
+
+    if saved:
+        save_chart_files(analysis_id, saved)
+
+
 def cmd_analyze(tickers=None, header="", primary=None, header_photo=None):
     """
     분석 실행 + 텔레그램 채널 전송
@@ -217,8 +246,13 @@ def cmd_analyze(tickers=None, header="", primary=None, header_photo=None):
         print(f"  ▶ [{ticker}] {name} 분석 중...")
         try:
             text = analyzer.analyze(ticker)
-            save_analysis(ticker, text)
+            analysis_id = save_analysis(ticker, text)
             charts = _make_chart(ticker, name)
+            # 웹용 차트 파일 dump (텔레그램과 별개로 디스크에 저장)
+            try:
+                _persist_charts(analysis_id, ticker, charts)
+            except Exception as e:
+                print(f"  [WARN] {ticker} 차트 파일 저장 실패: {e}")
             ok_results.append({"ticker": ticker, "analysis": text, "ok": True, "charts": charts})
             print(f"  [OK] {ticker} {name}")
         except Exception as e:
@@ -258,10 +292,27 @@ def cmd_analyze(tickers=None, header="", primary=None, header_photo=None):
         all_results.append({"ticker": r["ticker"], "analysis": err_msg})
 
     if all_results:
-        notifier.send_batch(all_results, header=full_header, header_photo=header_photo)
+        if os.getenv("WEB_ONLY") == "1":
+            # 한 줄 알림: 본문/차트는 웹에서 보고, 텔레그램은 미리보기만.
+            err_part = f" | 실패 {err_cnt}건" if err_cnt else ""
+            summary  = (
+                f"📊 분석 완료 — {ok_cnt}종목{err_part}"
+                + (f"\n{header}" if header else "")
+            )
+            notifier.send_brief(summary, path="/reports")
+        else:
+            notifier.send_batch(all_results, header=full_header, header_photo=header_photo)
 
     for r in ok_results:
         mark_sent(r["ticker"])
+
+    # 30일 이상 지난 차트 PNG 정리 (디스크 폭주 방지)
+    try:
+        n = cleanup_old_charts(keep_days=30)
+        if n:
+            print(f"[OK] 오래된 차트 {n}장 삭제")
+    except Exception as e:
+        print(f"  [WARN] 차트 정리 실패: {e}")
 
     print(f"[OK] 전송 완료: 정상 {ok_cnt}종목 | 에러 {err_cnt}종목")
 
@@ -340,8 +391,25 @@ def cmd_signals(tickers=None):
         except Exception as e:
             print(f"  [WARN] {ticker}: {e}")
 
-    text = format_report(all_sigs, len(targets), header=header)
-    notifier.send(text)
+    # 웹용 영속화: 같은 날짜 재실행 시에도 누적 (날짜 기준 그룹핑은 조회 시점에 수행)
+    if all_sigs:
+        try:
+            save_signals(datetime.now().strftime("%Y-%m-%d"), all_sigs)
+        except Exception as e:
+            print(f"  [WARN] 시그널 DB 저장 실패: {e}")
+
+    if os.getenv("WEB_ONLY") == "1":
+        cnt = len(all_sigs)
+        if cnt:
+            top = all_sigs[0]
+            tag = top.priority if hasattr(top, "priority") else ""
+            notifier.send_brief(f"🚨 시그널 {cnt}건 (top {tag})", path="/signals")
+        else:
+            notifier.send_brief(f"📡 시그널 스캔 — {len(targets)}종목, 발동 없음 ✅",
+                                path="/signals")
+    else:
+        text = format_report(all_sigs, len(targets), header=header)
+        notifier.send(text)
     print(f"[OK] 시그널 전송 완료 (발동 {len(all_sigs)}건)")
 
 

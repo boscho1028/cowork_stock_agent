@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}시장 경고 — Stock Agent{% endblock %}
+{% block content %}
+<h1>시장 경고 브리핑</h1>
+<p class="muted">최근 {{ items|length }}건</p>
+
+{% if not items %}
+  <p class="empty">아직 브리핑이 없습니다.</p>
+{% else %}
+{% for it in items %}
+<article class="warning-card">
+  <header>
+    <span class="when">{{ it.asof }}</span>
+    {% if it.fg_score is not none %}
+      <span class="fg">F&amp;G {{ it.fg_score }} ({{ it.fg_rating }})</span>
+    {% endif %}
+  </header>
+  <pre class="warning-body">{{ it.body }}</pre>
+</article>
+{% endfor %}
+{% endif %}
+{% endblock %}
