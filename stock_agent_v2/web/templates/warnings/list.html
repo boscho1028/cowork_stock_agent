@@ -7,16 +7,22 @@
 {% if not items %}
   <p class="empty">아직 브리핑이 없습니다.</p>
 {% else %}
-{% for it in items %}
-<article class="warning-card">
-  <header>
-    <span class="when">{{ it.asof }}</span>
-    {% if it.fg_score is not none %}
-      <span class="fg">F&amp;G {{ it.fg_score }} ({{ it.fg_rating }})</span>
-    {% endif %}
-  </header>
-  <pre class="warning-body">{{ it.body }}</pre>
-</article>
-{% endfor %}
+  <div class="warning-card-grid">
+    {% for it in items %}
+      <article class="warning-card fg-{{ it.fg_band or 'neutral' }} {% if it.is_today %}is-today{% endif %}">
+        <header>
+          <span class="when">{{ it.asof }}</span>
+          {% if it.is_today %}<span class="today-badge">오늘</span>{% endif %}
+          {% if it.fg_score is not none %}
+            <span class="fg-pill fg-{{ it.fg_band or 'neutral' }}">
+              F&amp;G <strong>{{ it.fg_score }}</strong>
+              <span class="rating">{{ it.fg_rating }}</span>
+            </span>
+          {% endif %}
+        </header>
+        <pre class="warning-body">{{ it.body }}</pre>
+      </article>
+    {% endfor %}
+  </div>
 {% endif %}
 {% endblock %}

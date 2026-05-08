@@ -6,7 +6,12 @@
   <p><a href="/reports">← 목록으로</a></p>
 {% else %}
 <a class="back" href="/reports">← 목록</a>
-<h1>{{ rec.ticker }}</h1>
+<div class="detail-head">
+  <h1>{{ rec.ticker }}</h1>
+  <form action="/reports/{{ rec.id }}/refresh" method="post" class="refresh-form">
+    <button type="submit" title="KIS 현재가로 캔들 update + 차트 재생성">🔄 지금 갱신</button>
+  </form>
+</div>
 <p class="muted">{{ rec.analyzed_at }}</p>
 
 {% set tf = {} %}
@@ -14,37 +19,46 @@
   {% set _ = tf.update({s.key: s}) %}
 {% endfor %}
 
-{# 항상 월 → 주 → 일 순으로 3섹션. 좌(텍스트) / 우(차트) 좌우 분할.
-   차트는 chart_files 우선, 없으면 /charts/live/ 폴백. #}
-{% for iv, icon, label in [
-    ("M", "📅", "월봉 (장기)"),
-    ("W", "📊", "주봉 (중기)"),
-    ("D", "📈", "일봉 (단기)"),
+{# cache-bust: 분석 id 별로 다른 query → 다른 분석은 새 응답, 같은 분석 재방문은 캐시 활용 #}
+{% set v = rec.id %}
+
+{# 인터벌별: 일 → 주 → 월 (단기 → 장기 흐름).
+   각 섹션: 메인 차트 → 분석 텍스트 → 엘리엇 차트(검출 시) #}
+{% for iv, icon, label, ekey in [
+    ("D", "📈", "일봉 (단기)", "E"),
+    ("W", "📊", "주봉 (중기)", "E_W"),
+    ("M", "📅", "월봉 (장기)", "E_M"),
 ] %}
   {% set s = tf.get(iv) %}
   <section class="tf-block">
     <h2>{{ icon }} {{ label }}</h2>
-    <div class="layout">
-      <div class="text-side">
-        {% if s and s.text %}
-          <pre class="report-body">{{ s.text }}</pre>
-        {% else %}
-          <p class="muted small">텍스트 없음</p>
-        {% endif %}
-      </div>
-      <div class="charts">
-        {% set chart_url = (s.chart_url if s and s.chart_url else "/charts/live/" ~ rec.ticker ~ "/" ~ iv) %}
-        <figure>
-          <figcaption>{{ rec.ticker }} · {{ label }}</figcaption>
-          <img src="{{ chart_url }}" alt="{{ rec.ticker }} {{ iv }}" loading="eager" />
-        </figure>
-        {% if s and s.elliott_url %}
-          <figure>
-            <figcaption>엘리엇 파동 ({{ label }})</figcaption>
-            <img src="{{ s.elliott_url }}" alt="{{ rec.ticker }} elliott {{ iv }}" loading="eager" />
-          </figure>
-        {% endif %}
-      </div>
+
+    {# 메인 캔들 차트 — 위 #}
+    <div class="charts">
+      {% set chart_url = (s.chart_url if s and s.chart_url else "/charts/live/" ~ rec.ticker ~ "/" ~ iv) %}
+      <figure class="chart-main">
+        <img src="{{ chart_url }}?v={{ v }}"
+             alt="{{ rec.ticker }} {{ iv }}"
+             loading="eager"
+             onerror="this.parentElement.innerHTML='<p class=\'muted small\'>차트 데이터 부족</p>'" />
+      </figure>
+    </div>
+
+    {# 분석 텍스트 — 가운데 #}
+    {% if s and s.text %}
+      <pre class="report-body">{{ s.text }}</pre>
+    {% endif %}
+
+    {# 엘리엇 파동 — 텍스트 아래, 메인 차트와 동일 크기. 검출 안 되면 자동 숨김 #}
+    {% set elliott_url = s.elliott_url if s and s.elliott_url else "/charts/live/elliott/" ~ rec.ticker ~ "/" ~ iv %}
+    <div class="charts elliott-block">
+      <figure class="chart-elliott">
+        <figcaption>🌊 엘리엇 파동 ({{ label }})</figcaption>
+        <img src="{{ elliott_url }}?v={{ v }}"
+             alt="{{ rec.ticker }} elliott {{ iv }}"
+             loading="eager"
+             onerror="this.closest('.elliott-block').style.display='none'" />
+      </figure>
     </div>
   </section>
 {% endfor %}
@@ -52,9 +66,7 @@
 {% if fallback_text %}
   <section class="tf-block fallback">
     <h2>📝 분석 본문</h2>
-    <div class="layout">
-      <pre class="report-body">{{ fallback_text }}</pre>
-    </div>
+    <pre class="report-body">{{ fallback_text }}</pre>
   </section>
 {% endif %}
 {% endif %}

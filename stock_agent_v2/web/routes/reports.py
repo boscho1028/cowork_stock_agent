@@ -1,12 +1,18 @@
 """분석 리포트 — universe 종목 그리드 + 분석 상세."""
 from __future__ import annotations
 
+from datetime import date
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 import config
 from database import latest_analysis_per_ticker, load_analysis
 from web.deps import require_user_or_redirect
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+LIVE_CHART_DIR = PROJECT_ROOT / "data" / "charts" / "_live"
 
 router = APIRouter()
 
@@ -66,16 +72,62 @@ def reports_list(request: Request):
     )
 
 
+import re as _re
+
+# 옛 한국어 헤더 패턴 — LLM 출력 형식이 마커 이전 시기인 경우 폴백.
+# 라인 시작에서 매칭 (이모지/공백/대괄호 허용).
+_KO_HEADER_PATTERNS = {
+    "MONTHLY": _re.compile(
+        r'^[\W_]*(?:큰그림\s*\(월봉\)|\[MONTHLY\]|장기\s*\(월봉\)|월봉\s*전략|월간\s*리포트)',
+        _re.MULTILINE,
+    ),
+    "WEEKLY": _re.compile(
+        r'^[\W_]*(?:중기\s*\(주봉\)|\[WEEKLY\]|주봉\s*전략|주간\s*리포트)',
+        _re.MULTILINE,
+    ),
+    "DAILY": _re.compile(
+        r'^[\W_]*(?:단기\s*\(일봉\)|\[SINGLE\]|\[DAILY\]|일봉\s*전략|일간\s*리포트)',
+        _re.MULTILINE,
+    ),
+}
+
+
+def _split_korean_headers(text: str) -> dict:
+    """옛 분석 텍스트의 한국어 헤더 (🔭 큰그림(월봉), [WEEKLY], [SINGLE] 등) 로 분할 시도."""
+    matches: list[tuple[int, str, int]] = []  # (start, label, line_end)
+    for label, pat in _KO_HEADER_PATTERNS.items():
+        m = pat.search(text)
+        if m:
+            line_end = text.find("\n", m.start())
+            if line_end == -1:
+                line_end = m.end()
+            matches.append((m.start(), label, line_end))
+    if len(matches) < 2:
+        return {}
+    matches.sort()
+    blocks: dict[str, str] = {}
+    for i, (_pos, label, line_end) in enumerate(matches):
+        next_start = matches[i + 1][0] if i + 1 < len(matches) else len(text)
+        body = text[line_end:next_start].strip()
+        if body:
+            blocks[label] = body
+    return blocks
+
+
 def _build_sections(rec: dict) -> tuple[list[dict], str | None]:
-    """rec.result_text 를 ===MONTHLY===/===WEEKLY===/===DAILY=== 마커로 분할 +
-    chart_files 또는 live URL 매핑하여 [월·주·일] 섹션 리스트 반환.
-    분할 실패 시 (sections=[], fallback_text=원문) 반환.
+    """rec.result_text 를 인터벌별 섹션으로 분할 + 차트 URL 매핑.
+    1) 새 마커 (===MONTHLY=== 등) 시도
+    2) 실패 시 옛 한국어 헤더 시도
+    3) 둘 다 실패 시 (sections=[], fallback_text=원문)
     """
     from telegram_bot import _split_analysis
 
-    blocks = _split_analysis(rec["result_text"] or "")
+    raw = rec["result_text"] or ""
+    blocks = _split_analysis(raw)
     if not blocks:
-        return [], rec.get("result_text", "")
+        blocks = _split_korean_headers(raw)
+    if not blocks:
+        return [], raw
 
     # chart_files: [{interval, file_path}, ...] → {interval: url}
     chart_url: dict[str, str] = {}
@@ -122,6 +174,52 @@ def _build_sections(rec: dict) -> tuple[list[dict], str | None]:
         },
     ]
     return sections, None
+
+
+@router.post("/reports/{analysis_id}/refresh")
+def reports_refresh(analysis_id: int, request: Request):
+    """수동 갱신 — KIS 에서 해당 종목의 최신 캔들을 받아서 차트 캐시 무효화.
+    완료 후 detail 페이지로 redirect."""
+    u = require_user_or_redirect(request)
+    if isinstance(u, RedirectResponse):
+        return u
+    rec = load_analysis(analysis_id)
+    if not rec:
+        return RedirectResponse(url="/reports", status_code=303)
+    ticker = rec["ticker"]
+
+    # 1) KIS 캔들 update
+    try:
+        from kis_collector import KISCollector
+        kis = KISCollector()
+        if kis.login():
+            kis.run_daily_update([ticker])
+        else:
+            print(f"[refresh] {ticker}: KIS 로그인 실패, 캔들 update 스킵")
+    except Exception as e:
+        print(f"[refresh] {ticker} KIS update 실패: {e}")
+
+    # 2) 디스크 캐시 무효화 — 오늘 폴더의 해당 종목 PNG 삭제 (캔들 + 엘리엇)
+    today = date.today().strftime("%Y%m%d")
+    today_dir = LIVE_CHART_DIR / today
+    removed = 0
+    if today_dir.exists():
+        for p in today_dir.glob(f"{ticker}_*.png"):
+            try:
+                p.unlink()
+                removed += 1
+            except Exception:
+                pass
+    print(f"[refresh] {ticker}: 캐시 {removed}장 삭제")
+
+    # 3) 메모리 캐시도 무효화 — 새 요청에서 디스크/생성 단계로 가도록
+    try:
+        from web.app import _wipe_chart_cache_for
+        _wipe_chart_cache_for(ticker)
+    except Exception:
+        pass
+
+    return RedirectResponse(url=f"/reports/{analysis_id}", status_code=303)
 
 
 @router.get("/reports/{analysis_id}")

@@ -766,6 +766,22 @@ def run_universe_signal_scan():
         _notify_batch_error("시그널 스캔", e)
 
 
+def run_chart_prebuild():
+    """주중 17:35 — 모든 종목 D/W/M 캔들 차트 + 엘리엇을 디스크에 미리 만들어
+    웹(detail 페이지) 의 차트 응답을 즉시화. 17:30 시그널 스캔이 universe
+    캔들을 update 한 직후라 시점도 자연스럽다.
+    """
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [PREBUILD] 차트 사전 생성 시작")
+    try:
+        from prebuild_charts import prebuild, collect_all_tickers
+        tickers = collect_all_tickers()
+        stats = prebuild(tickers, force=False)
+        print(f"[PREBUILD] 완료 — 캔들 {stats['created']}, 엘리엇 {stats['elliott_made']}, "
+              f"실패 {stats['failed']}, 총 {stats['elapsed']:.0f}s")
+    except Exception as e:
+        print(f"[PREBUILD] 실패 (스케줄 계속): {e}")
+
+
 def run_kr_evening():
     """월~금 17:00 — 한국 장 마감 후 국내 포트폴리오 가격·공시 업데이트 +
     universe 전체 외국인·기관 수급 수집 + portfolio AI 분석 + 차트 전송.
@@ -838,17 +854,21 @@ if __name__ == "__main__":
         #   · MORNING_BRIEF_TIME  — 미국 업데이트 + 한국 DART 공시 요약
         #   · EVENING_ANALYZE_TIME — 한국 포트폴리오 업데이트 + AI 분석
         from market_warning import run_market_warning
+        # 차트 prebuild 시각 — 시그널 스캔(17:30)이 universe 캔들을 update 한 직후
+        chart_prebuild_time = os.getenv("CHART_PREBUILD_TIME", "17:35")
         print(f"스케줄 모드 | 주중(월~금) "
               f"{config.MARKET_WARNING_TIME} 시장경고, "
               f"{config.MORNING_BRIEF_TIME} 모닝브리핑, "
               f"{config.EVENING_ANALYZE_TIME} 저녁분석, "
-              f"{config.SIGNAL_SCAN_TIME} 시그널스캔")
+              f"{config.SIGNAL_SCAN_TIME} 시그널스캔, "
+              f"{chart_prebuild_time} 차트prebuild")
         print("Ctrl+C 로 종료\n")
         for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
             getattr(schedule.every(), day).at(config.MARKET_WARNING_TIME).do(run_market_warning)
             getattr(schedule.every(), day).at(config.MORNING_BRIEF_TIME).do(run_morning_brief)
             getattr(schedule.every(), day).at(config.EVENING_ANALYZE_TIME).do(run_kr_evening)
             getattr(schedule.every(), day).at(config.SIGNAL_SCAN_TIME).do(run_universe_signal_scan)
+            getattr(schedule.every(), day).at(chart_prebuild_time).do(run_chart_prebuild)
         while True:
             schedule.run_pending()
             time.sleep(30)

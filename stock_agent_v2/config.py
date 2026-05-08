@@ -213,9 +213,16 @@ def _load_csv(path: str, has_qty: bool) -> dict:
             for row in reader:
                 ticker   = row.get("ticker",   "").strip()
                 name     = row.get("name",     "").strip()
-                exchange = row.get("exchange", "KRX").strip().upper()
+                exchange = (row.get("exchange") or "").strip().upper()
                 if not ticker:
                     continue
+                # 거래소가 비었거나 알 수 없는 값이면 티커 형태로 추정.
+                # (CSV 손상·부분 수기 편집 대비 — 한국 종목은 6자리 숫자.)
+                if exchange not in ("KRX", "KOSPI", "KOSDAQ",
+                                    "NASDAQ", "NYSE", "AMEX",
+                                    "TOKYO", "HONG_KONG",
+                                    "SHANGHAI", "SHENZHEN"):
+                    exchange = "KRX" if ticker.isdigit() else "NASDAQ"
                 if has_qty:
                     qty_raw = row.get("quantity", "0").strip() or "0"
                     qty = int(float(qty_raw))
@@ -296,6 +303,87 @@ def append_universe_row(ticker: str, name: str = "", exchange: str = None) -> bo
             "exchange":    exchange,
             "is_overseas": exchange not in ("KRX", "KOSPI", "KOSDAQ"),
         }
+    return True
+
+
+def _read_csv_rows(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            return [dict(row) for row in csv.DictReader(f)]
+    except Exception as e:
+        print(f"[CSV] {path} 읽기 실패: {e}")
+        return []
+
+
+def _rewrite_csv(path: str, rows: list[dict], fieldnames: list[str]):
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: (r.get(k) or "") for k in fieldnames})
+
+
+def append_portfolio_row(ticker: str, qty: int = 100) -> bool:
+    """ticker 를 portfolio.csv 에 추가. universe 에 메타가 있어야 함.
+    이미 portfolio 에 있으면 False.
+    """
+    ticker = ticker.upper()
+    with _universe_lock:
+        info = _universe_detail.get(ticker)
+    if not info:
+        return False
+    with _portfolio_lock:
+        if ticker in _portfolio_detail:
+            return False
+        created_new = not os.path.exists(CSV_PATH)
+        mode = "w" if created_new else "a"
+        with open(CSV_PATH, mode, encoding="utf-8-sig", newline="") as f:
+            w = csv.writer(f)
+            if created_new:
+                w.writerow(["ticker", "name", "quantity", "exchange"])
+            w.writerow([ticker, info["name"], qty, info["exchange"]])
+        _portfolio_detail[ticker] = {
+            "name":        info["name"],
+            "qty":         qty,
+            "exchange":    info["exchange"],
+            "is_overseas": info["is_overseas"],
+        }
+    return True
+
+
+def remove_portfolio_row(ticker: str) -> bool:
+    """portfolio.csv 에서 ticker 제거. universe 에는 영향 없음."""
+    ticker = ticker.upper()
+    with _portfolio_lock:
+        if ticker not in _portfolio_detail:
+            return False
+        rows = _read_csv_rows(CSV_PATH)
+        new_rows = [r for r in rows
+                    if (r.get("ticker") or "").strip().upper() != ticker]
+        _rewrite_csv(CSV_PATH, new_rows,
+                     ["ticker", "name", "quantity", "exchange"])
+        _portfolio_detail.pop(ticker, None)
+    return True
+
+
+def remove_universe_row(ticker: str) -> bool:
+    """universe.csv 에서 ticker 제거. portfolio.csv 에 있으면 함께 제거.
+    universe 에 없으면 False.
+    """
+    ticker = ticker.upper()
+    # portfolio 먼저 정리 (락 순서: portfolio → universe 단일 획득 패턴 유지)
+    remove_portfolio_row(ticker)
+    with _universe_lock:
+        if ticker not in _universe_detail:
+            return False
+        rows = _read_csv_rows(UNIVERSE_PATH)
+        new_rows = [r for r in rows
+                    if (r.get("ticker") or "").strip().upper() != ticker]
+        _rewrite_csv(UNIVERSE_PATH, new_rows,
+                     ["ticker", "name", "exchange"])
+        _universe_detail.pop(ticker, None)
     return True
 
 

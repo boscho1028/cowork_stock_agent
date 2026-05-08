@@ -2,28 +2,47 @@
 {% block title %}시그널 — Stock Agent{% endblock %}
 {% block content %}
 <h1>시그널 스캔</h1>
-<p class="muted">최근 30일</p>
+<p class="muted">최근 30일 · 국내 {{ grid.kr|length }}건 · 해외 {{ grid.us|length }}건</p>
 
-{% if not groups %}
-  <p class="empty">최근 발동된 시그널이 없습니다.</p>
-{% else %}
-  {% for g in groups %}
-    <section class="day-block">
-      <h2>{{ g.scan_date }} <span class="muted">· {{ g.items|length }}건</span></h2>
-      <ul class="signal-list">
-        {% for s in g.items %}
-          <li class="prio-{{ s.priority }}">
-            <div class="row1">
-              <span class="prio">{{ s.priority }}</span>
-              <span class="ticker">{{ s.ticker }}</span>
-              <span class="name">{{ s.name or "" }}</span>
-            </div>
-            <div class="row2"><strong>{{ s.title }}</strong> — {{ s.detail }}</div>
-            <div class="rule muted">rule: {{ s.rule }}</div>
-          </li>
-        {% endfor %}
-      </ul>
-    </section>
-  {% endfor %}
-{% endif %}
+{% macro render_card(s) %}
+  <article class="signal-card prio-{{ s.priority }} {% if s.is_today %}is-today{% endif %}">
+    <header>
+      <span class="prio">{{ s.priority }}</span>
+      <span class="ticker">
+        {% if s.is_portfolio %}<span class="star" title="포트폴리오">⭐</span>{% endif %}
+        {{ s.ticker }}
+      </span>
+      {% if s.name %}<span class="name">{{ s.name }}</span>{% endif %}
+      {% if s.is_today %}<span class="today-badge">오늘</span>{% endif %}
+      <span class="date">{{ s.scan_date }}</span>
+    </header>
+    <div class="title">
+      {% if s.title %}<strong>{{ s.title }}</strong>{% endif %}
+      {% if s.detail %} <span class="detail">{{ s.detail }}</span>{% endif %}
+    </div>
+    {% if s.rule %}<div class="rule muted">rule: {{ s.rule }}</div>{% endif %}
+  </article>
+{% endmacro %}
+
+<section class="market-block" data-market="kr">
+  <h2>🇰🇷 국내 <span class="muted small">· {{ grid.kr|length }}건</span></h2>
+  {% if not grid.kr %}
+    <p class="empty">최근 국내 시그널이 없습니다.</p>
+  {% else %}
+    <div class="signal-card-grid">
+      {% for s in grid.kr %}{{ render_card(s) }}{% endfor %}
+    </div>
+  {% endif %}
+</section>
+
+<section class="market-block" data-market="us">
+  <h2>🇺🇸 해외 <span class="muted small">· {{ grid.us|length }}건</span></h2>
+  {% if not grid.us %}
+    <p class="empty">최근 해외 시그널이 없습니다.</p>
+  {% else %}
+    <div class="signal-card-grid">
+      {% for s in grid.us %}{{ render_card(s) }}{% endfor %}
+    </div>
+  {% endif %}
+</section>
 {% endblock %}

@@ -101,16 +101,20 @@ a:hover { text-decoration: underline; }
 }
 
 .ticker-card {
-  display: block; padding: 8px 10px;
+  position: relative;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); transition: border-color .12s, transform .12s;
-  text-decoration: none;
 }
 .ticker-card.has-analysis:hover {
-  border-color: var(--accent); text-decoration: none;
+  border-color: var(--accent);
   transform: translateY(-1px);
 }
-.ticker-card.no-analysis { opacity: 0.4; cursor: default; }
+.ticker-card.no-analysis .card-link { opacity: 0.4; cursor: default; }
+.ticker-card .card-link {
+  display: block; padding: 8px 26px 8px 28px;
+  color: var(--text); text-decoration: none;
+}
+.ticker-card .card-link:hover { text-decoration: none; }
 .ticker-card .row1 {
   display: flex; align-items: baseline; gap: 6px;
 }
@@ -118,7 +122,6 @@ a:hover { text-decoration: underline; }
   font-weight: 700; font-size: 13px;
   flex-shrink: 0;
 }
-.ticker-card .star { color: #f0c43a; font-size: 12px; margin-right: 2px; }
 .ticker-card .name {
   color: var(--muted); font-size: 12px;
   flex: 1; min-width: 0;
@@ -130,6 +133,57 @@ a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums;
 }
 
+/* 별표 버튼 — 좌측 상단. active 면 노란 ⭐, 아니면 흐린 ☆ */
+.ticker-card .star-btn {
+  position: absolute; left: 4px; top: 5px;
+  background: transparent; border: none; padding: 2px 4px;
+  font-size: 14px; line-height: 1; cursor: pointer;
+  color: var(--muted); opacity: 0.5;
+  transition: opacity .12s, transform .12s;
+}
+.ticker-card .star-btn:hover { opacity: 1; transform: scale(1.15); }
+.ticker-card .star-btn.active { color: #f0c43a; opacity: 1; }
+.ticker-card .star-btn.active:hover { transform: scale(1.15); }
+
+/* X 제거 버튼 — 우측 상단. 평소엔 거의 안 보임, 호버 시 또렷 */
+.ticker-card .remove-btn {
+  position: absolute; right: 2px; top: 2px;
+  background: transparent; border: none; padding: 0 6px;
+  font-size: 16px; line-height: 1; cursor: pointer;
+  color: var(--muted); opacity: 0.25;
+  transition: opacity .12s, color .12s;
+}
+.ticker-card:hover .remove-btn { opacity: 0.75; }
+.ticker-card .remove-btn:hover { color: var(--red); opacity: 1; }
+
+/* 종목 추가 버튼 / 폼 */
+.tabs .tab-add { padding: 7px 10px; font-weight: 700; }
+.tabs .tab-add.active { background: var(--accent); color: white; }
+.add-ticker {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  margin: -8px 0 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px;
+}
+.add-ticker input, .add-ticker select {
+  padding: 7px 9px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px;
+  font-size: 13px;
+}
+.add-ticker input[name="ticker"] { flex: 0 1 180px; min-width: 140px; text-transform: uppercase; }
+.add-ticker input[name="name"]   { flex: 1 1 160px; min-width: 140px; }
+.add-ticker select               { flex: 0 0 110px; }
+.add-ticker input:focus, .add-ticker select:focus { outline: none; border-color: var(--accent); }
+.add-ticker button[type="submit"] {
+  background: var(--accent); color: white; border: none; border-radius: 5px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.add-ticker button[type="submit"]:hover { opacity: 0.9; }
+.add-ticker .add-msg { font-size: 12px; color: var(--muted); flex-basis: 100%; }
+.add-ticker .add-msg.error { color: var(--red); }
+.add-ticker .add-msg.ok    { color: #56d364; }
+
 /* ── 분석 리포트 상세 ─────────────────────────────────── */
 pre.report-body, pre.warning-body {
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -138,14 +192,22 @@ pre.report-body, pre.warning-body {
   margin: 8px 0;
 }
 
-.charts {
-  display: flex; flex-direction: column; gap: 12px;
-  width: 100%;
+/* detail 헤더 — 종목명 + 지금 갱신 버튼 */
+.detail-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin: 4px 0 0;
 }
-.charts > p.small { font-size: 12px; margin: 0; }
-.charts figure { margin: 0; }
+.detail-head h1 { margin: 0; }
+.refresh-form { margin-left: auto; }
+.refresh-form button {
+  background: var(--accent); color: white;
+  border: none; border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; cursor: pointer;
+}
+.refresh-form button:hover { opacity: 0.85; }
+.refresh-form button:active { transform: translateY(1px); }
 
-/* 일/주/월봉 섹션 — 시각 분리 + 좌우 레이아웃 */
+/* 일/주/월봉 섹션 — 차트 위(크게), 설명 아래 */
 .tf-block {
   border: 1px solid var(--border); border-radius: 10px;
   padding: 14px 16px; margin: 18px 0;
@@ -156,32 +218,28 @@ pre.report-body, pre.warning-body {
   font-size: 16px;
 }
 
-/* 모바일 (기본): 텍스트 위, 차트 아래 — 차트 풀너비로 크게 */
-.tf-block .layout {
-  display: grid; gap: 14px;
-  grid-template-columns: 1fr;
+.tf-block .charts {
+  display: flex; flex-direction: column; gap: 12px;
+  width: 100%; margin-bottom: 12px;
 }
-.tf-block pre.report-body { margin: 0; }
+.tf-block .charts figure { margin: 0; width: 100%; }
 .tf-block .charts img {
-  width: 100%; height: auto; border-radius: 8px;
-  border: 1px solid var(--border); display: block;
+  width: 100%; height: auto; max-height: 720px;
+  border-radius: 8px; border: 1px solid var(--border);
+  display: block; object-fit: contain;
+  background: #0e1117;  /* 다크 배경과 맞춰 빈 영역 자연스럽게 */
 }
 .tf-block .charts figcaption {
   font-size: 12px; color: var(--muted); margin-bottom: 6px;
 }
+.tf-block pre.report-body { margin: 12px 0; }
 
-/* 데스크톱: 텍스트(왼) + 차트(오) 좌우 분할, 차트 영역 더 크게 */
-@media (min-width: 900px) {
-  .tf-block .layout {
-    grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
-    align-items: start;
-  }
-  /* 텍스트 영역 sticky — 차트 스크롤되어도 옆에 남음 */
-  .tf-block .text-side { position: sticky; top: 110px; }
+/* 엘리엇 블록 — 메인 차트와 동일 너비, 위쪽 살짝 간격 */
+.tf-block .elliott-block { margin-top: 10px; }
+.tf-block .chart-elliott figcaption {
+  font-size: 13px; color: var(--accent); margin-bottom: 6px;
+  font-weight: 600;
 }
-
-/* 분석 본문 fallback (마커 분할 실패 시) — 풀너비 */
-.tf-block.fallback .layout { grid-template-columns: 1fr !important; }
 .charts figure { margin: 0; }
 .charts figcaption { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .charts img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border); display: block; }
@@ -189,48 +247,218 @@ pre.report-body, pre.warning-body {
   .charts { grid-template-columns: 1fr 1fr; }
 }
 
-/* ── 시그널 목록 ──────────────────────────────────────── */
-.day-block { margin-top: 18px; }
-.signal-list { list-style: none; margin: 0; padding: 0; }
-.signal-list li {
-  border-left: 3px solid var(--border);
-  padding: 10px 12px; margin-bottom: 8px;
-  background: var(--panel); border-radius: 0 6px 6px 0;
+/* ── 시그널 카드 ──────────────────────────────────────── */
+.signal-card-grid {
+  display: grid; gap: 8px;
+  grid-template-columns: 1fr;
 }
-.signal-list li.prio-🔴 { border-left-color: var(--red); }
-.signal-list li.prio-🟠 { border-left-color: var(--orange); }
-.signal-list li.prio-🟡 { border-left-color: var(--yellow); }
-.signal-list .row1 { display: flex; gap: 8px; align-items: baseline; }
-.signal-list .row2 { margin-top: 4px; font-size: 14px; }
-.signal-list .rule { font-size: 11px; margin-top: 2px; }
-.signal-list .ticker { font-weight: 700; }
-.signal-list .name { color: var(--muted); }
+@media (min-width: 720px) {
+  .signal-card-grid { grid-template-columns: 1fr 1fr; }
+}
 
-/* ── 시장 경고 카드 ───────────────────────────────────── */
+.signal-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  display: flex; flex-direction: column; gap: 4px;
+  transition: transform .12s, border-color .12s;
+}
+.signal-card:hover { transform: translateY(-1px); }
+
+/* 우선순위 색상 — 좌측 굵은 띠 + 살짝 그라데이션 배경 */
+.signal-card.prio-🔴 {
+  border-left-color: var(--red);
+  background: linear-gradient(90deg, rgba(248,81,73,0.14), var(--panel) 70%);
+}
+.signal-card.prio-🟠 {
+  border-left-color: var(--orange);
+  background: linear-gradient(90deg, rgba(255,145,51,0.13), var(--panel) 70%);
+}
+.signal-card.prio-🟡 {
+  border-left-color: var(--yellow);
+  background: linear-gradient(90deg, rgba(210,153,34,0.10), var(--panel) 70%);
+}
+
+.signal-card header {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px;
+}
+.signal-card .prio { font-size: 13px; }
+.signal-card .ticker { font-weight: 700; font-size: 13px; }
+.signal-card .ticker .star { color: #f0c43a; font-size: 11px; margin-right: 2px; }
+.signal-card .name {
+  color: var(--muted); font-size: 12px;
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.signal-card .date {
+  color: var(--muted); margin-left: auto;
+  font-variant-numeric: tabular-nums; font-size: 11px;
+}
+.signal-card .title { line-height: 1.4; }
+.signal-card .title strong { color: var(--text); }
+.signal-card .title .detail { color: var(--muted); }
+.signal-card .rule { font-size: 11px; }
+
+/* 오늘 발생한 시그널 — 추가 글로우 (좌측 priority 색상은 유지) */
+.signal-card.is-today {
+  box-shadow: 0 0 0 1px rgba(86, 211, 100, 0.35),
+              0 0 12px rgba(86, 211, 100, 0.18);
+}
+
+/* ── 시장 경고 카드 (F&G 레벨 색상) ───────────────────── */
+.warning-card-grid { display: flex; flex-direction: column; gap: 12px; }
+
 .warning-card {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: 12px; margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
 }
 .warning-card header {
-  display: flex; gap: 12px; justify-content: space-between;
-  font-size: 13px; color: var(--muted); margin-bottom: 8px;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  font-size: 13px; color: var(--muted); margin-bottom: 10px;
 }
-.warning-card .fg { color: var(--accent); }
+.warning-card .when {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.warning-card .fg-pill {
+  margin-left: auto;
+  padding: 3px 10px; border-radius: 14px;
+  font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border);
+}
+.warning-card .fg-pill strong { font-size: 13px; }
+.warning-card .fg-pill .rating {
+  margin-left: 4px; font-weight: 400; opacity: 0.85;
+}
+.warning-card .warning-body {
+  margin: 0; padding: 12px;
+  background: rgba(0,0,0,0.18);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
 
-/* ── 공시 목록 ────────────────────────────────────────── */
-.filing-list { list-style: none; margin: 0; padding: 0; }
-.filing-list li {
-  border-bottom: 1px solid var(--border);
-  padding: 10px 0;
+/* F&G 5단계 색상 — 카드 좌측 띠 + 카드 자체 배경 + pill */
+.warning-card.fg-extreme-fear {
+  border-left-color: #f85149;
+  background: linear-gradient(135deg, rgba(248,81,73,0.10), var(--panel) 50%);
 }
-.filing-list .row1 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
-.filing-list .src { background: var(--border); color: var(--text); padding: 1px 6px; border-radius: 4px; font-size: 11px; }
-.filing-list .src-SEC .src { background: #2d4a7c; }
-.filing-list .ticker { font-weight: 700; }
-.filing-list .name { color: var(--muted); }
-.filing-list .date { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
-.filing-list .row2 { margin-top: 3px; }
-.filing-list .extra { font-size: 12px; margin-top: 2px; }
+.warning-card.fg-extreme-fear .fg-pill {
+  background: rgba(248,81,73,0.18); color: #ffb4b0; border-color: rgba(248,81,73,0.5);
+}
+.warning-card.fg-fear {
+  border-left-color: var(--orange);
+  background: linear-gradient(135deg, rgba(255,145,51,0.09), var(--panel) 50%);
+}
+.warning-card.fg-fear .fg-pill {
+  background: rgba(255,145,51,0.18); color: #ffd0a4; border-color: rgba(255,145,51,0.5);
+}
+.warning-card.fg-neutral {
+  border-left-color: var(--muted);
+}
+.warning-card.fg-neutral .fg-pill {
+  background: rgba(139,148,158,0.15); color: var(--muted);
+}
+.warning-card.fg-greed {
+  border-left-color: var(--yellow);
+  background: linear-gradient(135deg, rgba(210,153,34,0.08), var(--panel) 50%);
+}
+.warning-card.fg-greed .fg-pill {
+  background: rgba(210,153,34,0.18); color: #f0d488; border-color: rgba(210,153,34,0.5);
+}
+.warning-card.fg-extreme-greed {
+  border-left-color: #56d364;
+  background: linear-gradient(135deg, rgba(86,211,100,0.10), var(--panel) 50%);
+}
+.warning-card.fg-extreme-greed .fg-pill {
+  background: rgba(86,211,100,0.18); color: #aef0b6; border-color: rgba(86,211,100,0.5);
+}
+
+/* 오늘 발표된 경고 — 글로우 (F&G 색상은 유지) */
+.warning-card.is-today {
+  box-shadow: 0 0 0 1px rgba(86, 211, 100, 0.35),
+              0 0 14px rgba(86, 211, 100, 0.18);
+}
+
+/* ── 공시 카드 ────────────────────────────────────────── */
+.filing-card-grid {
+  display: grid; gap: 8px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 720px) {
+  .filing-card-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.filing-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.filing-card.prio-🔴 { border-left-color: var(--red); }
+.filing-card.prio-🟡 { border-left-color: var(--yellow); }
+.filing-card.prio-🔵 { border-left-color: var(--accent); }
+
+/* 오늘 발표된 공시 — 초록 강조 (좌측 priority 색상은 그대로 둠) */
+.filing-card.is-today {
+  background: linear-gradient(135deg, rgba(86, 211, 100, 0.08), var(--panel) 60%);
+  border-color: rgba(86, 211, 100, 0.45);
+  box-shadow: 0 0 0 1px rgba(86, 211, 100, 0.15);
+}
+.filing-card .today-badge {
+  background: #56d364; color: #0e1117;
+  padding: 1px 7px; border-radius: 10px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.filing-card header {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.filing-card .src {
+  background: var(--border); color: var(--text);
+  padding: 1px 6px; border-radius: 4px; font-size: 11px;
+  font-weight: 600;
+}
+.filing-card.src-SEC .src { background: #2d4a7c; color: #d6e3f7; }
+.filing-card .ticker { font-weight: 700; font-size: 13px; }
+.filing-card .ticker .star { color: #f0c43a; font-size: 11px; margin-right: 2px; }
+.filing-card .name {
+  color: var(--muted); font-size: 12px;
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.filing-card .date {
+  color: var(--muted); margin-left: auto;
+  font-variant-numeric: tabular-nums; font-size: 11px;
+}
+.filing-card .title {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  line-height: 1.4;
+}
+.filing-card .form-badge {
+  background: rgba(68, 147, 248, 0.15); color: var(--accent);
+  border: 1px solid rgba(68, 147, 248, 0.3);
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.filing-card .title a { color: var(--accent); }
+.filing-card .prio-dot { font-size: 10px; }
+.filing-card .extra {
+  font-size: 11px; color: var(--muted); margin-top: 2px;
+}
 
 /* ── 로그인 페이지 ────────────────────────────────────── */
 .login-body {

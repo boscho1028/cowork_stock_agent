@@ -2,30 +2,53 @@
 {% block title %}공시 — Stock Agent{% endblock %}
 {% block content %}
 <h1>공시 (DART · SEC)</h1>
-<p class="muted">최근 14일 · {{ items|length }}건</p>
+<p class="muted">최근 14일 · 국내 {{ grid.kr|length }}건 · 해외 {{ grid.us|length }}건</p>
 
-{% if not items %}
-  <p class="empty">최근 공시가 없습니다.</p>
-{% else %}
-<ul class="filing-list">
-  {% for it in items %}
-    <li class="src-{{ it.source }}">
-      <div class="row1">
-        <span class="src">{{ it.source }}</span>
-        <span class="ticker">{{ it.ticker }}</span>
-        {% if it.name %}<span class="name">{{ it.name }}</span>{% endif %}
-        <span class="date">{{ it.date }}</span>
-      </div>
-      <div class="row2">
-        {% if it.url %}
-          <a href="{{ it.url }}" target="_blank" rel="noreferrer noopener">{{ it.title }} ↗</a>
-        {% else %}
-          {{ it.title }}
-        {% endif %}
-      </div>
-      {% if it.extra %}<div class="extra muted">{{ it.extra }}</div>{% endif %}
-    </li>
-  {% endfor %}
-</ul>
-{% endif %}
+{% macro render_card(it) %}
+  {% set has_url = it.url %}
+  <article class="filing-card src-{{ it.source }} {% if it.icon %}prio-{{ it.icon }}{% endif %} {% if it.is_today %}is-today{% endif %}">
+    <header>
+      <span class="src">{{ it.source }}</span>
+      <span class="ticker">
+        {% if it.is_portfolio %}<span class="star" title="포트폴리오">⭐</span>{% endif %}
+        {{ it.ticker }}
+      </span>
+      {% if it.name %}<span class="name">{{ it.name }}</span>{% endif %}
+      {% if it.is_today %}<span class="today-badge">오늘</span>{% endif %}
+      <span class="date">{{ it.date }}</span>
+    </header>
+    <div class="title">
+      {% if it.form %}<span class="form-badge">{{ it.form }}</span>{% endif %}
+      {% if has_url %}
+        <a href="{{ it.url }}" target="_blank" rel="noreferrer noopener">{{ it.summary }} ↗</a>
+      {% else %}
+        {{ it.summary }}
+      {% endif %}
+      {% if it.icon %}<span class="prio-dot" title="중요도">{{ it.icon }}</span>{% endif %}
+    </div>
+    {% if it.extra %}<div class="extra muted">{{ it.extra }}</div>{% endif %}
+  </article>
+{% endmacro %}
+
+<section class="market-block" data-market="kr">
+  <h2>🇰🇷 국내 (DART) <span class="muted small">· {{ grid.kr|length }}건</span></h2>
+  {% if not grid.kr %}
+    <p class="empty">최근 국내 공시가 없습니다.</p>
+  {% else %}
+    <div class="filing-card-grid">
+      {% for it in grid.kr %}{{ render_card(it) }}{% endfor %}
+    </div>
+  {% endif %}
+</section>
+
+<section class="market-block" data-market="us">
+  <h2>🇺🇸 해외 (SEC) <span class="muted small">· {{ grid.us|length }}건</span></h2>
+  {% if not grid.us %}
+    <p class="empty">최근 해외 공시가 없습니다.</p>
+  {% else %}
+    <div class="filing-card-grid">
+      {% for it in grid.us %}{{ render_card(it) }}{% endfor %}
+    </div>
+  {% endif %}
+</section>
 {% endblock %}
