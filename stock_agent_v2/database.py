@@ -308,8 +308,18 @@ def upsert_candles(
     """
     if df.empty:
         return 0
+
+    # 월봉은 KIS API가 그 달의 '마지막 거래일'을 date로 반환한다.
+    # 진행 중인 달을 매일 호출하면 매일 다른 date(=호출 당일)로 새 행이 INSERT 되어
+    # UNIQUE(ticker, interval, date) 가 중복을 차단하지 못한다.
+    # → interval='M' 행은 항상 'YYYY-MM-01' 로 정규화해서 한 달에 한 행만 유지.
+    def _norm(idx) -> str:
+        if interval == "M":
+            return f"{idx.year:04d}-{idx.month:02d}-01"
+        return str(idx.date())
+
     rows = [
-        (ticker, interval, str(idx.date()),
+        (ticker, interval, _norm(idx),
          float(row.open), float(row.high),
          float(row.low),  float(row.close), float(row.volume))
         for idx, row in df.iterrows()
