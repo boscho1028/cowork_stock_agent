@@ -158,19 +158,26 @@ def cmd_update(tickers=None):
 
 
 def _make_chart(ticker: str, name: str) -> dict:
-    """일/주/월 차트 생성 + 인터벌별 엘리엇 검출 시 E/E_W/E_M 차트 추가.
-    반환: {"D": bytes, "W": bytes, "M": bytes,
-            ["E": bytes, "E_W": bytes, "E_M": bytes]}"""
+    """일/주/월 기술 차트 + 일/주/월 일목 차트 + 엘리엇 차트 생성.
+    반환: {"D","W","M": 기술 차트, "D_I","W_I","M_I": 일목 차트,
+           ["E","E_W","E_M": 엘리엇]}"""
     charts = {}
     df_by_interval: dict = {}
+    ichi_key = {"D": "D_I", "W": "W_I", "M": "M_I"}
     for interval, limit in [("D", 400), ("W", 260), ("M", 60)]:
         try:
             df = load_candles(ticker, interval, limit=limit)
-            if not df.empty:
-                charts[interval] = generate_chart(
-                    df, ticker, name, config.INDICATOR_CONFIG, interval=interval
-                )
-                df_by_interval[interval] = df
+            if df.empty:
+                continue
+            charts[interval] = generate_chart(
+                df, ticker, name, config.INDICATOR_CONFIG,
+                interval=interval, mode="tech",
+            )
+            charts[ichi_key[interval]] = generate_chart(
+                df, ticker, name, config.INDICATOR_CONFIG,
+                interval=interval, mode="ichi",
+            )
+            df_by_interval[interval] = df
         except Exception as e:
             lbl = {"D": "일봉", "W": "주봉", "M": "월봉"}[interval]
             print(f"  [WARN] {ticker} {lbl} 차트 생성 실패: {e}")

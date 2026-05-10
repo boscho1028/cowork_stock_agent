@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ rec.ticker if rec else "분석 없음" }} — Stock Agent{% endblock %}
+{% block title %}{{ rec.ticker if rec else "분석 없음" }} — Vanguard{% endblock %}
 {% block content %}
 {% if not rec %}
   <p class="empty">해당 분석을 찾을 수 없습니다.</p>
@@ -23,7 +23,7 @@
 {% set v = rec.id %}
 
 {# 인터벌별: 일 → 주 → 월 (단기 → 장기 흐름).
-   각 섹션: 메인 차트 → 분석 텍스트 → 엘리엇 차트(검출 시) #}
+   각 섹션: 기술 차트 + 텍스트 → 일목 차트 + 일목 텍스트 → 엘리엇 차트(검출 시) #}
 {% for iv, icon, label, ekey in [
     ("D", "📈", "일봉 (단기)", "E"),
     ("W", "📊", "주봉 (중기)", "E_W"),
@@ -33,7 +33,7 @@
   <section class="tf-block">
     <h2>{{ icon }} {{ label }}</h2>
 
-    {# 메인 캔들 차트 — 위 #}
+    {# 1) 기술 차트 (캔들 + MA + 거래량 + RSI) #}
     <div class="charts">
       {% set chart_url = (s.chart_url if s and s.chart_url else "/charts/live/" ~ rec.ticker ~ "/" ~ iv) %}
       <figure class="chart-main">
@@ -44,12 +44,29 @@
       </figure>
     </div>
 
-    {# 분석 텍스트 — 가운데 #}
+    {# 기술 분석 텍스트 #}
     {% if s and s.text %}
       <pre class="report-body">{{ s.text }}</pre>
     {% endif %}
 
-    {# 엘리엇 파동 — 텍스트 아래, 메인 차트와 동일 크기. 검출 안 되면 자동 숨김 #}
+    {# 2) 일목균형표 차트 (캔들 + 일목) #}
+    {% set ichi_url = s.ichi_url if s and s.ichi_url else "/charts/live/" ~ rec.ticker ~ "/" ~ iv ~ "_I" %}
+    <div class="charts ichi-block">
+      <figure class="chart-ichi">
+        <figcaption>☁️ 일목균형표 ({{ label }})</figcaption>
+        <img src="{{ ichi_url }}?v={{ v }}"
+             alt="{{ rec.ticker }} ichi {{ iv }}"
+             loading="eager"
+             onerror="this.closest('.ichi-block').style.display='none'" />
+      </figure>
+    </div>
+
+    {# 일목균형표 텍스트 (옵셔널 — 옛 분석에는 ICHI 블록 없음) #}
+    {% if s and s.ichi_text %}
+      <pre class="report-body">{{ s.ichi_text }}</pre>
+    {% endif %}
+
+    {# 3) 엘리엇 파동 — 검출 안 되면 자동 숨김 #}
     {% set elliott_url = s.elliott_url if s and s.elliott_url else "/charts/live/elliott/" ~ rec.ticker ~ "/" ~ iv %}
     <div class="charts elliott-block">
       <figure class="chart-elliott">

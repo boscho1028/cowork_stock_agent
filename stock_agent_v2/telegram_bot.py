@@ -8,15 +8,20 @@ import requests
 from datetime import datetime
 
 
-_BLOCK_MARKER_RE = re.compile(r'^={3}(MONTHLY|WEEKLY|DAILY)={3}\s*$', re.MULTILINE)
+_BLOCK_MARKER_RE = re.compile(
+    r'^={3}(MONTHLY_ICHI|WEEKLY_ICHI|DAILY_ICHI|MONTHLY|WEEKLY|DAILY)={3}\s*$',
+    re.MULTILINE,
+)
 
 
 def _split_analysis(text: str) -> dict:
-    """LLM 출력에서 ===MONTHLY=== / ===WEEKLY=== / ===DAILY=== 마커로
-    구분된 블록을 분리. 마커가 하나라도 없으면 빈 dict 반환 (호출자가 폴백 처리).
+    """LLM 출력 마커 분리. 6개 블록 지원 (각 _ICHI 는 일목 차트 설명):
+      ===MONTHLY===, ===MONTHLY_ICHI===, ===WEEKLY===, ===WEEKLY_ICHI===,
+      ===DAILY===, ===DAILY_ICHI===
+    필수 3개 (MONTHLY/WEEKLY/DAILY) 가 없으면 빈 dict 반환 (호출자가 폴백 처리).
+    _ICHI 블록은 옵셔널 — 없으면 단순히 빠진 채로 반환.
     """
     parts = _BLOCK_MARKER_RE.split(text)
-    # parts: ['<preamble>', 'MONTHLY', '<m>', 'WEEKLY', '<w>', 'DAILY', '<d>'] (순서 임의)
     if len(parts) < 7:
         return {}
     blocks = {}
@@ -113,10 +118,11 @@ class TelegramNotifier:
     # ── 일괄 전송 ─────────────────────────────────────────────────────
     def send_batch(self, results: list, header: str = "", header_photo: bytes | None = None):
         """종목 리스트 일괄 전송.
-        분석 텍스트는 ===MONTHLY=== / ===WEEKLY=== / ===DAILY=== 마커로 3분할되어
-        각각 월봉·주봉·일봉 차트의 caption 으로 따로 발송된다.
-        발송 순서: 일봉 → (엘리엇 일봉) → 주봉 → (엘리엇 주봉) → 월봉 → (엘리엇 월봉).
-        엘리엇 차트는 검출된 인터벌만 발송됨.
+        분석 텍스트는 6개 마커(===MONTHLY===, ===MONTHLY_ICHI===, ===WEEKLY===,
+        ===WEEKLY_ICHI===, ===DAILY===, ===DAILY_ICHI===)로 분할되어 각 차트의
+        caption 으로 따로 발송된다.
+        발송 순서: D → D_I → (E) → W → W_I → (E_W) → M → M_I → (E_M).
+        엘리엇 차트는 검출된 인터벌만 발송됨. _ICHI 블록은 옵셔널이라 없으면 폴백 캡션 사용.
         마커 분할이 실패하면 폴백: 일봉 차트에 전체 텍스트를 caption 으로 붙인다.
         header_photo: 헤더 텍스트 직후 발송할 추가 이미지(예: 수급 차트). None 이면 스킵.
         각 사진 사이 1.0초 대기 — 텔레그램 분당 한도 회피.
@@ -142,16 +148,23 @@ class TelegramNotifier:
             blocks = _split_analysis(analysis)
 
             if blocks:
-                # 정상 분할: D → E → W → E_W → M → E_M 순 (단기 → 큰 그림)
-                m_cap = blocks["MONTHLY"]
-                w_cap = blocks["WEEKLY"]
-                d_cap = blocks["DAILY"]
+                # 정상 분할: D → D_I → E → W → W_I → E_W → M → M_I → E_M 순 (단기 → 큰 그림)
+                m_cap   = blocks["MONTHLY"]
+                w_cap   = blocks["WEEKLY"]
+                d_cap   = blocks["DAILY"]
+                # _ICHI 블록은 옵셔널 — 없으면 종목/인터벌 표기만으로 폴백
+                m_i_cap = blocks.get("MONTHLY_ICHI") or f"[일목 월봉] {ticker}"
+                w_i_cap = blocks.get("WEEKLY_ICHI")  or f"[일목 주봉] {ticker}"
+                d_i_cap = blocks.get("DAILY_ICHI")   or f"[일목 일봉] {ticker}"
                 send_plan = [
                     ("D",   d_cap),
+                    ("D_I", d_i_cap),
                     ("E",   f"[엘리엇 일봉] {ticker}"),
                     ("W",   w_cap),
+                    ("W_I", w_i_cap),
                     ("E_W", f"[엘리엇 주봉] {ticker}"),
                     ("M",   m_cap),
+                    ("M_I", m_i_cap),
                     ("E_M", f"[엘리엇 월봉] {ticker}"),
                 ]
                 d_sent_ok = False
@@ -187,9 +200,12 @@ class TelegramNotifier:
                     time.sleep(0.6)
 
                 for iv, caption in [
+                    ("D_I", f"[일목 일봉] {ticker}"),
                     ("W",   f"[주봉] {ticker}"),
+                    ("W_I", f"[일목 주봉] {ticker}"),
                     ("E_W", f"[엘리엇 주봉] {ticker}"),
                     ("M",   f"[월봉] {ticker}"),
+                    ("M_I", f"[일목 월봉] {ticker}"),
                     ("E_M", f"[엘리엇 월봉] {ticker}"),
                     ("E",   f"[엘리엇 일봉] {ticker}"),
                 ]:

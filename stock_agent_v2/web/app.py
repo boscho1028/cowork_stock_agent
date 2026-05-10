@@ -27,7 +27,7 @@ CHARTS_DIR = PROJECT_ROOT / "data" / "charts"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Stock Agent (private share)")
+    app = FastAPI(title="Vanguard (private share)")
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -150,8 +150,12 @@ def create_app() -> FastAPI:
         from chart_generator import generate_chart
         import traceback
 
-        limit = {"D": 400, "W": 260, "M": 60}.get(interval, 200)
-        df = load_candles(ticker, interval, limit=limit)
+        # 일목 차트는 _I 접미사 — 기반 캔들은 동일하나 mode="ichi" 로 그림
+        is_ichi = interval.endswith("_I")
+        base_iv = interval[:-2] if is_ichi else interval
+        chart_mode = "ichi" if is_ichi else "tech"
+        limit = {"D": 400, "W": 260, "M": 60}.get(base_iv, 200)
+        df = load_candles(ticker, base_iv, limit=limit)
         if df.empty:
             print(f"[charts/live] {ticker} {interval}: candles 없음")
             return None
@@ -160,7 +164,8 @@ def create_app() -> FastAPI:
              or {})
         name = info.get("name", ticker)
         try:
-            png = generate_chart(df, ticker, name, _cfg.INDICATOR_CONFIG, interval=interval)
+            png = generate_chart(df, ticker, name, _cfg.INDICATOR_CONFIG,
+                                 interval=base_iv, mode=chart_mode)
             if png:
                 _chart_cache[key] = png
                 # 디스크에도 저장 — cleanup_old_charts 가 일자 기준 정리
@@ -193,7 +198,7 @@ def create_app() -> FastAPI:
         u = require_user_or_redirect(request)
         if isinstance(u, RedirectResponse):
             return u
-        if interval not in ("D", "W", "M"):
+        if interval not in ("D", "W", "M", "D_I", "W_I", "M_I"):
             raise HTTPException(400, "bad interval")
         _validate_ticker(ticker)
         png = _live_chart(ticker.upper(), interval, _today_key())

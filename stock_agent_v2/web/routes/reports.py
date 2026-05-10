@@ -139,38 +139,44 @@ def _build_sections(rec: dict) -> tuple[list[dict], str | None]:
             chart_url[c["interval"]] = rel
 
     ticker = rec["ticker"]
-    # 저장된 게 없으면 live URL 폴백 (D/W/M 만 — 엘리엇은 저장본 있을 때만)
+    # 저장된 게 없으면 live URL 폴백 (D/W/M + D_I/W_I/M_I — 엘리엇은 저장본 있을 때만)
     def url_for(iv: str) -> str | None:
         if iv in chart_url:
             return chart_url[iv]
-        if iv in ("D", "W", "M"):
+        if iv in ("D", "W", "M", "D_I", "W_I", "M_I"):
             return f"/charts/live/{ticker}/{iv}"
         return None
 
     sections = [
         {
-            "key":         "M",
-            "icon":        "📅",
-            "label":       "월봉 (장기)",
-            "text":        blocks.get("MONTHLY", ""),
-            "chart_url":   url_for("M"),
-            "elliott_url": url_for("E_M"),
+            "key":          "M",
+            "icon":         "📅",
+            "label":        "월봉 (장기)",
+            "text":         blocks.get("MONTHLY", ""),
+            "ichi_text":    blocks.get("MONTHLY_ICHI", ""),
+            "chart_url":    url_for("M"),
+            "ichi_url":     url_for("M_I"),
+            "elliott_url":  url_for("E_M"),
         },
         {
-            "key":         "W",
-            "icon":        "📊",
-            "label":       "주봉 (중기)",
-            "text":        blocks.get("WEEKLY", ""),
-            "chart_url":   url_for("W"),
-            "elliott_url": url_for("E_W"),
+            "key":          "W",
+            "icon":         "📊",
+            "label":        "주봉 (중기)",
+            "text":         blocks.get("WEEKLY", ""),
+            "ichi_text":    blocks.get("WEEKLY_ICHI", ""),
+            "chart_url":    url_for("W"),
+            "ichi_url":     url_for("W_I"),
+            "elliott_url":  url_for("E_W"),
         },
         {
-            "key":         "D",
-            "icon":        "📈",
-            "label":       "일봉 (단기)",
-            "text":        blocks.get("DAILY", ""),
-            "chart_url":   url_for("D"),
-            "elliott_url": url_for("E"),
+            "key":          "D",
+            "icon":         "📈",
+            "label":        "일봉 (단기)",
+            "text":         blocks.get("DAILY", ""),
+            "ichi_text":    blocks.get("DAILY_ICHI", ""),
+            "chart_url":    url_for("D"),
+            "ichi_url":     url_for("D_I"),
+            "elliott_url":  url_for("E"),
         },
     ]
     return sections, None

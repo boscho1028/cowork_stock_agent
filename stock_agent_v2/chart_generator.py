@@ -1,10 +1,13 @@
 """
 chart_generator.py - 일봉/주봉/월봉 기술적 분석 차트
 
-패널 구성:
-  1. 캔들 + 이동평균 + 일목균형표 (일/주/월봉 모두 구름·선행·후행 표시)
+generate_chart(... mode="tech")  — 기술 차트 (3 패널)
+  1. 캔들 + 이동평균
   2. 거래량 + MA20
   3. RSI(14) + Signal(6)
+
+generate_chart(... mode="ichi")  — 일목균형표 차트 (1 패널)
+  1. 캔들 + 일목균형표 (구름·선행·후행)
 """
 
 import io
@@ -174,8 +177,12 @@ def generate_chart(
     cfg:       dict,
     interval:  str = "D",
     n_candles: int = None,
+    mode:      str = "tech",
 ) -> bytes:
-    """캔들차트 이미지 생성 → PNG bytes 반환"""
+    """캔들차트 이미지 생성 → PNG bytes 반환.
+    mode="tech": 캔들 + MA + 거래량 + RSI (3패널, 일목 미표시)
+    mode="ichi": 캔들 + 일목균형표 (1패널, MA·거래량·RSI 미표시)
+    """
     if df_daily.empty or len(df_daily) < 5:
         return _error_image(ticker, "데이터 부족")
 
@@ -183,10 +190,11 @@ def generate_chart(
     if n_candles is None:
         n_candles = d["n"]
 
-    ma_periods   = cfg.get(d["cfg_key"], [5, 20, 60, 120])
-    show_ichi    = d["ichi"]
-    show_future  = d["future"]
-    show_chikou  = d["chikou"]
+    is_ichi_mode = (mode == "ichi")
+    ma_periods   = [] if is_ichi_mode else cfg.get(d["cfg_key"], [5, 20, 60, 120])
+    show_ichi    = is_ichi_mode and d["ichi"]
+    show_future  = d["future"] and is_ichi_mode
+    show_chikou  = d["chikou"] and is_ichi_mode
     interval_lbl = d["label"]
 
     os_line = cfg.get("rsi_oversold",   30)
@@ -251,12 +259,20 @@ def generate_chart(
 
     # ── 레이아웃 ─────────────────────────────────────────────────────────
     fig = plt.figure(figsize=(14, 9), facecolor=C["bg"])
-    gs  = GridSpec(3, 1, figure=fig, height_ratios=[4.5, 1.5, 1.5], hspace=0.04)
-    ax_c = fig.add_subplot(gs[0])
-    ax_v = fig.add_subplot(gs[1], sharex=ax_c)
-    ax_r = fig.add_subplot(gs[2], sharex=ax_c)
+    if is_ichi_mode:
+        # 일목 차트는 캔들 + 구름만 — 한 패널 전체 사용
+        gs   = GridSpec(1, 1, figure=fig)
+        ax_c = fig.add_subplot(gs[0])
+        ax_v = ax_r = None
+        axes = [ax_c]
+    else:
+        gs   = GridSpec(3, 1, figure=fig, height_ratios=[4.5, 1.5, 1.5], hspace=0.04)
+        ax_c = fig.add_subplot(gs[0])
+        ax_v = fig.add_subplot(gs[1], sharex=ax_c)
+        ax_r = fig.add_subplot(gs[2], sharex=ax_c)
+        axes = [ax_c, ax_v, ax_r]
 
-    for ax in [ax_c, ax_v, ax_r]:
+    for ax in axes:
         ax.set_facecolor(C["panel"])
         ax.tick_params(colors=C["text"], labelsize=7.5)
         ax.yaxis.tick_right()
@@ -381,8 +397,9 @@ def generate_chart(
     prev  = c.iloc[-2] if n > 1 else curr
     chg   = (curr / prev - 1) * 100
     sign  = "+" if chg >= 0 else ""
+    title_suffix = " · 일목균형표" if is_ichi_mode else ""
     ax_c.set_title(
-        f"[{interval_lbl}]  {name}({ticker})   {curr:,.0f}   {sign}{chg:.2f}%   "
+        f"[{interval_lbl}{title_suffix}]  {name}({ticker})   {curr:,.0f}   {sign}{chg:.2f}%   "
         f"[{df.index[-1].strftime('%Y-%m-%d')} 기준  |  {n}봉]",
         color=C["text"], fontsize=10, pad=7, loc="left",
     )
@@ -396,55 +413,58 @@ def generate_chart(
     mg = (pmax - pmin) * 0.05
     ax_c.set_ylim(pmin - mg, pmax + mg)
 
-    # ── 패널2: 거래량 ────────────────────────────────────────────────────
-    for i, (_, row) in enumerate(df.iterrows()):
-        col = C["vol_bull"] if row["close"] >= row["open"] else C["vol_bear"]
-        ax_v.bar(i, row["volume"], color=col, width=0.7, alpha=0.85)
-    ax_v.plot(xs, df["volume"].rolling(20).mean(), color=MA_COLORS[20], lw=0.9, alpha=0.8)
-    ax_v.set_ylabel("VOL", color=C["subtext"], fontsize=7, labelpad=2)
+    if not is_ichi_mode:
+        # ── 패널2: 거래량 ────────────────────────────────────────────────
+        for i, (_, row) in enumerate(df.iterrows()):
+            col = C["vol_bull"] if row["close"] >= row["open"] else C["vol_bear"]
+            ax_v.bar(i, row["volume"], color=col, width=0.7, alpha=0.85)
+        ax_v.plot(xs, df["volume"].rolling(20).mean(), color=MA_COLORS[20], lw=0.9, alpha=0.8)
+        ax_v.set_ylabel("VOL", color=C["subtext"], fontsize=7, labelpad=2)
 
-    def vol_fmt(x, _):
-        if x >= 1e8: return f"{x/1e8:.0f}억"
-        if x >= 1e4: return f"{x/1e4:.0f}만"
-        return f"{x:.0f}"
-    ax_v.yaxis.set_major_formatter(mtick.FuncFormatter(vol_fmt))
+        def vol_fmt(x, _):
+            if x >= 1e8: return f"{x/1e8:.0f}억"
+            if x >= 1e4: return f"{x/1e4:.0f}만"
+            return f"{x:.0f}"
+        ax_v.yaxis.set_major_formatter(mtick.FuncFormatter(vol_fmt))
 
-    # ── 패널3: RSI + 시그널 ──────────────────────────────────────────────
-    ax_r.plot(xs, rsi,     color=C["rsi_line"], lw=1.1, zorder=3, label=f"RSI(14)")
-    ax_r.plot(xs, rsi_sig, color=C["rsi_sig"],  lw=0.9, zorder=3, label="Signal(6)")
-    ax_r.axhline(ob_line, color=C["rsi_ob"], lw=0.8, linestyle="--", alpha=0.8)
-    ax_r.axhline(os_line, color=C["rsi_os"], lw=0.8, linestyle="--", alpha=0.8)
-    ax_r.axhline(50,       color=C["grid"],   lw=0.4, alpha=0.6)
-    ax_r.fill_between(xs, rsi, ob_line, where=(rsi >= ob_line), color=C["rsi_ob"], alpha=0.18, zorder=1)
-    ax_r.fill_between(xs, rsi, os_line, where=(rsi <= os_line), color=C["rsi_os"], alpha=0.18, zorder=1)
+        # ── 패널3: RSI + 시그널 ──────────────────────────────────────────
+        ax_r.plot(xs, rsi,     color=C["rsi_line"], lw=1.1, zorder=3, label=f"RSI(14)")
+        ax_r.plot(xs, rsi_sig, color=C["rsi_sig"],  lw=0.9, zorder=3, label="Signal(6)")
+        ax_r.axhline(ob_line, color=C["rsi_ob"], lw=0.8, linestyle="--", alpha=0.8)
+        ax_r.axhline(os_line, color=C["rsi_os"], lw=0.8, linestyle="--", alpha=0.8)
+        ax_r.axhline(50,       color=C["grid"],   lw=0.4, alpha=0.6)
+        ax_r.fill_between(xs, rsi, ob_line, where=(rsi >= ob_line), color=C["rsi_ob"], alpha=0.18, zorder=1)
+        ax_r.fill_between(xs, rsi, os_line, where=(rsi <= os_line), color=C["rsi_os"], alpha=0.18, zorder=1)
 
-    curr_rsi = rsi.iloc[-1]
-    if not np.isnan(curr_rsi):
-        rsi_col = C["rsi_ob"] if curr_rsi >= ob_line else (C["rsi_os"] if curr_rsi <= os_line else C["rsi_line"])
-        ax_r.annotate(f"RSI {curr_rsi:.1f}", xy=(n-1, curr_rsi),
-                      xytext=(n-14, curr_rsi + (7 if curr_rsi < 75 else -10)),
-                      color=rsi_col, fontsize=7.5, fontweight="bold",
-                      arrowprops=dict(arrowstyle="-", color=rsi_col, lw=0.5))
+        curr_rsi = rsi.iloc[-1]
+        if not np.isnan(curr_rsi):
+            rsi_col = C["rsi_ob"] if curr_rsi >= ob_line else (C["rsi_os"] if curr_rsi <= os_line else C["rsi_line"])
+            ax_r.annotate(f"RSI {curr_rsi:.1f}", xy=(n-1, curr_rsi),
+                          xytext=(n-14, curr_rsi + (7 if curr_rsi < 75 else -10)),
+                          color=rsi_col, fontsize=7.5, fontweight="bold",
+                          arrowprops=dict(arrowstyle="-", color=rsi_col, lw=0.5))
 
-    ax_r.set_ylim(0, 100)
-    ax_r.set_yticks([os_line, 50, ob_line])
-    ax_r.set_ylabel("RSI", color=C["subtext"], fontsize=7, labelpad=2)
-    ax_r.legend(loc="upper left", fontsize=6.5, ncol=2,
-                facecolor=C["panel"], labelcolor=C["text"],
-                edgecolor=C["grid"], framealpha=0.85)
+        ax_r.set_ylim(0, 100)
+        ax_r.set_yticks([os_line, 50, ob_line])
+        ax_r.set_ylabel("RSI", color=C["subtext"], fontsize=7, labelpad=2)
+        ax_r.legend(loc="upper left", fontsize=6.5, ncol=2,
+                    facecolor=C["panel"], labelcolor=C["text"],
+                    edgecolor=C["grid"], framealpha=0.85)
 
     # ── x축 날짜 ─────────────────────────────────────────────────────────
-    total_w = n + (offset if show_future else 0)
-    step    = max(total_w // 10, 1)
-    ticks   = [i for i in range(0, n, step)]
-    ax_r.set_xticks(ticks)
-    ax_r.set_xticklabels([df.index[i].strftime("%m/%d") for i in ticks],
-                         color=C["text"], fontsize=7.5)
-    plt.setp(ax_c.get_xticklabels(), visible=False)
-    plt.setp(ax_v.get_xticklabels(), visible=False)
+    total_w  = n + (offset if show_future else 0)
+    step     = max(total_w // 10, 1)
+    ticks    = [i for i in range(0, n, step)]
+    bottom_ax = ax_r if not is_ichi_mode else ax_c
+    bottom_ax.set_xticks(ticks)
+    bottom_ax.set_xticklabels([df.index[i].strftime("%m/%d") for i in ticks],
+                              color=C["text"], fontsize=7.5)
+    if not is_ichi_mode:
+        plt.setp(ax_c.get_xticklabels(), visible=False)
+        plt.setp(ax_v.get_xticklabels(), visible=False)
     ax_c.set_xlim(-1, total_w)
 
-    fig.text(0.995, 0.005, "Stock AI Agent", ha="right", va="bottom",
+    fig.text(0.995, 0.005, "Vanguard", ha="right", va="bottom",
              color=C["grid"], fontsize=7, alpha=0.4)
 
     buf = io.BytesIO()

@@ -613,8 +613,17 @@ class StockAnalyzer:
         w_pat = detect_candle_patterns(weekly,  n=4)
         m_pat = detect_candle_patterns(monthly, n=3)
 
-        # 일목균형표 (일봉 기준, 400봉으로 충분)
-        ichi = compute_ichimoku(daily, cfg)
+        # 일목균형표 — 인터벌별 파라미터 (chart_generator 와 동일 매핑)
+        # D: 9/26/52/26 (cfg 기본값)
+        # W: 9/13/26/13 (시간차 절반)
+        # M: 5/8/13/8  (월봉용 더 단축)
+        def _ichi_cfg(t, k, sb, off):
+            return {**cfg, "ichimoku_tenkan": t, "ichimoku_kijun": k,
+                    "ichimoku_span_b": sb, "ichimoku_offset": off}
+
+        ichi   = compute_ichimoku(daily, cfg)
+        ichi_w = compute_ichimoku(weekly,  _ichi_cfg(9, 13, 26, 13))
+        ichi_m = compute_ichimoku(monthly, _ichi_cfg(5,  8, 13,  8))
 
         # 5일선 풀백 시그널 (Round 4 backtest 검증)
         pullback = compute_pullback_signal(daily, cfg)
@@ -653,7 +662,8 @@ class StockAnalyzer:
             ticker, name, qty, curr, currency, overseas,
             d_ind, w_ind, m_ind,
             d_pat, w_pat, m_pat,
-            ichi, pullback, elliott, disc_text, disc_label, report,
+            ichi, ichi_w, ichi_m,
+            pullback, elliott, disc_text, disc_label, report,
         )
 
         text, provider = self._call_ai(prompt)
@@ -661,7 +671,9 @@ class StockAnalyzer:
 
     def _build_prompt(
         self, ticker, name, qty, curr, currency, overseas,
-        d, w, m, d_pat, w_pat, m_pat, ichi, pullback, elliott, disc, disc_label, report
+        d, w, m, d_pat, w_pat, m_pat,
+        ichi, ichi_w, ichi_m,
+        pullback, elliott, disc, disc_label, report
     ) -> str:
 
         fp = lambda v: _fp(v, overseas)
@@ -700,23 +712,30 @@ class StockAnalyzer:
         else:
             pullback_txt = pullback.get("message", "데이터 부족")
 
-        # 일목균형표 텍스트
-        if ichi.get("available"):
-            data_count = ichi.get("data_count", 0)
-            ichi_lines = [
-                f"전환선({self.cfg['ichimoku_tenkan']}): {fp(ichi['tenkan'])}  "
-                f"기준선({self.cfg['ichimoku_kijun']}): {fp(ichi['kijun'])}",
-                f"선행스팬A: {fp(ichi['span_a'])}  선행스팬B: {fp(ichi['span_b'])}",
-                f"구름 위치: {ichi['cloud_pos']}",
-                f"전환/기준 크로스: {ichi['tk_cross']}",
-                f"일목 지지: {[fp(v) for v in ichi['support']]}  "
-                f"일목 저항: {[fp(v) for v in ichi['resistance']]}",
-                f"(분석 기준: {data_count}봉)",
-            ]
-            ichi_txt = "\n".join(ichi_lines)
-        else:
-            reason = ichi.get("reason", "데이터 부족")
-            ichi_txt = f"계산 불가: {reason}"
+        # 일목균형표 텍스트 — D/W/M 각각 (시간프레임별 파라미터)
+        IchiParams = {
+            "D": (9, 26),   # 전환·기준
+            "W": (9, 13),
+            "M": (5,  8),
+        }
+        def _ichi_text(ichi_dict, tf_key):
+            t_n, k_n = IchiParams[tf_key]
+            if not ichi_dict.get("available"):
+                return f"계산 불가: {ichi_dict.get('reason', '데이터 부족')}"
+            return "\n".join([
+                f"전환선({t_n}): {fp(ichi_dict['tenkan'])}  "
+                f"기준선({k_n}): {fp(ichi_dict['kijun'])}",
+                f"선행스팬A: {fp(ichi_dict['span_a'])}  선행스팬B: {fp(ichi_dict['span_b'])}",
+                f"구름 위치: {ichi_dict['cloud_pos']}",
+                f"전환/기준 크로스: {ichi_dict['tk_cross']}",
+                f"일목 지지: {[fp(v) for v in ichi_dict['support']]}  "
+                f"일목 저항: {[fp(v) for v in ichi_dict['resistance']]}",
+                f"(분석 기준: {ichi_dict.get('data_count', 0)}봉)",
+            ])
+
+        ichi_txt   = _ichi_text(ichi,   "D")
+        ichi_txt_w = _ichi_text(ichi_w, "W")
+        ichi_txt_m = _ichi_text(ichi_m, "M")
 
         # 엘리엇 파동 텍스트 (PoC: 일봉 추진 5파만, 모든 후보 노출)
         if elliott.get("available"):
@@ -747,10 +766,6 @@ class StockAnalyzer:
         def fmt_pat(pat):
             lines = pat["patterns"] if pat["patterns"] else ["특이 패턴 없음"]
             return "\n".join(lines) + f"\n→ 종합: {pat['signal']}"
-
-        # 프롬프트 내에서 config 값 직접 참조
-        t_n = self.cfg["ichimoku_tenkan"]
-        k_n = self.cfg["ichimoku_kijun"]
 
         market_tag = "해외주식" if overseas else "국내주식"
 
@@ -794,8 +809,14 @@ RSI: {m.get('rsi_signal','N/A')}
 {m_pat['candles']}
 {fmt_pat(m_pat)}
 
-═══ 일목균형표 (일봉 기준) ═══
+═══ 일목균형표 — 일봉 (9/26/52, shift 26) ═══
 {ichi_txt}
+
+═══ 일목균형표 — 주봉 (9/13/26, shift 13) ═══
+{ichi_txt_w}
+
+═══ 일목균형표 — 월봉 (5/8/13, shift 8) ═══
+{ichi_txt_m}
 
 ═══ 5일선 풀백 시그널 (검증된 매매 룰) ═══
 {pullback_txt}
@@ -808,20 +829,40 @@ RSI: {m.get('rsi_signal','N/A')}
 {disc}
 
 ─────────────────────────────────────────────────────────
-아래 형식으로 텔레그램 메시지를 작성하세요. **반드시 3개 블록으로 나누고**, 각 블록은
-지정된 마커 한 줄로 시작해야 합니다. 각 블록은 해당 차트의 caption으로 따로 발송되니
-**블록당 1000자 이내**로 압축하세요. 마커(===MONTHLY===, ===WEEKLY===, ===DAILY===)는
-변형·생략 금지, 정확히 그대로 출력.
+아래 형식으로 텔레그램·웹 리포트를 작성하세요. **반드시 6개 블록으로 나누고**, 각 블록은
+지정된 마커 한 줄로 시작해야 합니다. 각 블록은 해당 차트의 caption / 설명으로 따로 표시되니
+**블록당 1000자 이내**로 압축하세요. 마커(===MONTHLY===, ===MONTHLY_ICHI===, ===WEEKLY===,
+===WEEKLY_ICHI===, ===DAILY===, ===DAILY_ICHI===)는 변형·생략 금지, 정확히 그대로 출력.
+
+블록 매핑:
+  ===MONTHLY===       → 월봉 기술 차트(MA·패턴) 설명
+  ===MONTHLY_ICHI===  → 월봉 일목균형표 차트 설명
+  ===WEEKLY===        → 주봉 기술 차트 설명
+  ===WEEKLY_ICHI===   → 주봉 일목균형표 차트 설명
+  ===DAILY===         → 일봉 기술 차트 설명 + 풀백/엘리엇/공시/전략(헤더 포함)
+  ===DAILY_ICHI===    → 일봉 일목균형표 차트 설명
 
 ===MONTHLY===
 🔭 큰그림(월봉) — {name}({ticker}) {currency}{fp(curr)}{chg_str}
 · MA10: {{월봉 10선 상황 + 돌파 여부}}
 · 패턴: {{월봉 추세전환 신호}}
 
+===MONTHLY_ICHI===
+☁️ 일목균형표 (월봉)
+· {{구름 위치}} | 전환 {fp(ichi_m.get('tenkan'))} / 기준 {fp(ichi_m.get('kijun'))}
+· 지지: {{지지레벨}} | 저항: {{저항레벨}}
+· {{전환/기준 크로스 여부 + 장기 시각 의미}}
+
 ===WEEKLY===
 [WEEKLY] 중기(주봉) — {name}({ticker}) {currency}{fp(curr)}{chg_str}
 · MA10: {{주봉 10선 상황 + 돌파 여부}}
 · 패턴: {{주봉 추세전환 신호}}
+
+===WEEKLY_ICHI===
+☁️ 일목균형표 (주봉)
+· {{구름 위치}} | 전환 {fp(ichi_w.get('tenkan'))} / 기준 {fp(ichi_w.get('kijun'))}
+· 지지: {{지지레벨}} | 저항: {{저항레벨}}
+· {{전환/기준 크로스 여부 + 중기 시각 의미}}
 
 ===DAILY===
 [REPORT] {name}({ticker}) [{market_tag}]
@@ -831,11 +872,6 @@ RSI: {m.get('rsi_signal','N/A')}
 · RSI: {{과매도 진입/탈출 여부}}
 · 패턴: {{일봉 추세전환 신호}}
 · MACD: {{크로스 여부}}
-
-☁️ 일목균형표
-· {{구름 위치}} | 전환 {fp(ichi.get('tenkan'))} / 기준 {fp(ichi.get('kijun'))}
-· 지지: {{지지레벨}} | 저항: {{저항레벨}}
-· {{전환/기준선 크로스 여부}}
 
 🎯 5일선 풀백 시그널
 · {{시그널 발생 시: 강도(🔥STRONG≥4.0 / 📈MODERATE≥3.0 / 👁️WATCH≥2.0) + 현재 gap_atr 값.
@@ -864,6 +900,12 @@ RSI: {m.get('rsi_signal','N/A')}
 📍 진입: {{가격}}  🛑 손절: {{가격 또는 조건}}
 💰 목표: 1차 {{가격}} / 2차 {{가격}}
 확신도: {{XX%}}
+
+===DAILY_ICHI===
+☁️ 일목균형표 (일봉)
+· {{구름 위치}} | 전환 {fp(ichi.get('tenkan'))} / 기준 {fp(ichi.get('kijun'))}
+· 지지: {{지지레벨}} | 저항: {{저항레벨}}
+· {{전환/기준 크로스 여부 + 단기 시각 의미}}
 """
 
     @property
