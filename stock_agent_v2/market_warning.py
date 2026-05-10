@@ -291,6 +291,14 @@ def build_warning_message() -> str:
                 f"({info['change_pct']:+.2f}%)"
             )
 
+    # 2-b) 한국 시장 단계 — stockeasy.intellio.kr 무인증 API
+    # 외부 호출 실패해도 브리핑 자체는 영향 없음(빈 리스트 반환)
+    try:
+        from stockeasy_client import korea_market_lines
+        market_lines.extend(korea_market_lines())
+    except Exception as e:
+        print(f"[WARN] korea_market_lines 실패: {type(e).__name__}: {e}")
+
     # 3) Fear & Greed 라인
     if fg.get("available"):
         fg_line = (
