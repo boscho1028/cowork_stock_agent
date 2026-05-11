@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}ETF 모멘텀 — Vanguard{% endblock %}
+
+{% macro pct(v) -%}
+{%- if v is none %}—{% else %}{{ '%+.1f%%'|format(v * 100) }}{%- endif %}
+{%- endmacro %}
+
+{% macro money_krw(v) -%}
+{%- if v is none %}—{% else %}{{ '{:,.0f}'.format(v) }}{% endif -%}
+{%- endmacro %}
+
+{% block content %}
+<h1>📈 ETF 모멘텀</h1>
+<p class="muted">한미 ETF 모멘텀 스크리닝 (Jegadeesh-Titman 가중치 1W·1M·3M = 0.4·0.4·0.2){% if asof %} · {{ asof }} 기준{% endif %}</p>
+
+{% if not asof %}
+  <p class="empty">스크리닝 데이터 없음 — momentum_etf 배치 실행 후 다시 확인하세요.</p>
+{% else %}
+
+{% if unified %}
+<section class="etf-block">
+  <h2>🌐 통합 매칭 (한미 동일 테마)</h2>
+  <div class="etf-table-wrap">
+    <table class="etf-table">
+      <thead>
+        <tr>
+          <th>테마</th>
+          <th>US</th>
+          <th class="num">US 1W</th>
+          <th class="num">US 1M</th>
+          <th class="num">US 3M</th>
+          <th>KR</th>
+          <th class="kr-name">KR 이름</th>
+          <th class="num">KR 1W</th>
+          <th class="num">KR 1M</th>
+          <th class="num">KR 3M</th>
+          <th class="num">괴리</th>
+          <th class="num">손절</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in unified %}
+        <tr>
+          <td>{{ r.theme }}</td>
+          <td>{{ r.us_ticker }}</td>
+          <td class="num {{ 'pos' if (r.us_return_1w or 0) > 0 else 'neg' }}">{{ pct(r.us_return_1w) }}</td>
+          <td class="num {{ 'pos' if (r.us_return_1m or 0) > 0 else 'neg' }}">{{ pct(r.us_return_1m) }}</td>
+          <td class="num {{ 'pos' if (r.us_return_3m or 0) > 0 else 'neg' }}">{{ pct(r.us_return_3m) }}</td>
+          <td>{{ r.kr_ticker }}</td>
+          <td class="kr-name">{{ r.kr_ticker_name or '' }}</td>
+          <td class="num {{ 'pos' if (r.kr_return_1w or 0) > 0 else 'neg' }}">{{ pct(r.kr_return_1w) }}</td>
+          <td class="num {{ 'pos' if (r.kr_return_1m or 0) > 0 else 'neg' }}">{{ pct(r.kr_return_1m) }}</td>
+          <td class="num {{ 'pos' if (r.kr_return_3m or 0) > 0 else 'neg' }}">{{ pct(r.kr_return_3m) }}</td>
+          <td class="num">{% if r.discount_rate is none %}—{% else %}{{ '%+.2f%%'|format(r.discount_rate) }}{% endif %}</td>
+          <td class="num">{{ money_krw(r.stop_loss) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if kr %}
+<section class="etf-block">
+  <h2>🇰🇷 국내 ETF 모멘텀 Top {{ kr|length }}</h2>
+  <div class="etf-table-wrap">
+    <table class="etf-table">
+      <thead>
+        <tr>
+          <th>티커</th>
+          <th class="kr-name">이름</th>
+          <th class="num">1D</th>
+          <th class="num">1W</th>
+          <th class="num">1M</th>
+          <th class="num">3M</th>
+          <th class="num">Score</th>
+          <th class="num">현재가</th>
+          <th class="num">손절</th>
+          <th class="num">거래대금(억)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in kr %}
+        <tr>
+          <td>{{ r.ticker }}</td>
+          <td class="kr-name">{{ r.name or '' }}</td>
+          <td class="num {{ 'pos' if (r.return_1d or 0) > 0 else 'neg' }}">{{ pct(r.return_1d) }}</td>
+          <td class="num {{ 'pos' if (r.return_1w or 0) > 0 else 'neg' }}">{{ pct(r.return_1w) }}</td>
+          <td class="num {{ 'pos' if (r.return_1m or 0) > 0 else 'neg' }}">{{ pct(r.return_1m) }}</td>
+          <td class="num {{ 'pos' if (r.return_3m or 0) > 0 else 'neg' }}">{{ pct(r.return_3m) }}</td>
+          <td class="num">{{ '%.3f'|format(r.momentum_score) }}</td>
+          <td class="num">{{ money_krw(r.current_price) }}</td>
+          <td class="num">{{ money_krw(r.stop_loss) }}</td>
+          <td class="num">{% if r.avg_trading_value %}{{ '%.0f'|format(r.avg_trading_value / 1e8) }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if us %}
+<section class="etf-block">
+  <h2>🇺🇸 미국 ETF 모멘텀 Top {{ us|length }}</h2>
+  <div class="etf-table-wrap">
+    <table class="etf-table">
+      <thead>
+        <tr>
+          <th>티커</th>
+          <th class="kr-name">이름</th>
+          <th class="num">1D</th>
+          <th class="num">1W</th>
+          <th class="num">1M</th>
+          <th class="num">3M</th>
+          <th class="num">Score</th>
+          <th class="num">현재가</th>
+          <th class="num">손절</th>
+          <th class="num">거래량($M)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in us %}
+        <tr>
+          <td>{{ r.ticker }}</td>
+          <td class="kr-name">{{ r.name or '' }}</td>
+          <td class="num {{ 'pos' if (r.return_1d or 0) > 0 else 'neg' }}">{{ pct(r.return_1d) }}</td>
+          <td class="num {{ 'pos' if (r.return_1w or 0) > 0 else 'neg' }}">{{ pct(r.return_1w) }}</td>
+          <td class="num {{ 'pos' if (r.return_1m or 0) > 0 else 'neg' }}">{{ pct(r.return_1m) }}</td>
+          <td class="num {{ 'pos' if (r.return_3m or 0) > 0 else 'neg' }}">{{ pct(r.return_3m) }}</td>
+          <td class="num">{{ '%.3f'|format(r.momentum_score) }}</td>
+          <td class="num">${{ '%.2f'|format(r.current_price) if r.current_price else '—' }}</td>
+          <td class="num">${{ '%.2f'|format(r.stop_loss) if r.stop_loss else '—' }}</td>
+          <td class="num">{% if r.avg_volume_usd %}{{ '%.1f'|format(r.avg_volume_usd / 1e6) }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% endif %}
+{% endblock %}

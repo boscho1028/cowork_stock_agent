@@ -221,6 +221,67 @@ pre.report-body, pre.warning-body {
   font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 6px;
 }
 
+/* 수급 동향 페이지 */
+.supply-chart { margin: 12px 0 24px; }
+.supply-chart img {
+  width: 100%; height: auto; max-height: 900px;
+  border-radius: 8px; border: 1px solid var(--border);
+  display: block; object-fit: contain;
+  background: #0e1117;
+}
+.supply-list {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+}
+.supply-card {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; background: rgba(255,255,255,0.015);
+}
+.supply-card h3 { margin: 0 0 6px; font-size: 14px; }
+.supply-row {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12px;
+}
+.supply-row pre {
+  margin: 0; flex: 1; white-space: pre-wrap;
+  font-family: inherit;
+}
+.supply-row .role {
+  display: inline-block; min-width: 44px;
+  font-weight: 600;
+}
+.supply-row .role.foreign { color: #42a5f5; }
+.supply-row .role.inst    { color: #ffa726; }
+
+/* ETF 모멘텀 페이지 */
+.etf-block { margin: 18px 0 24px; }
+.etf-block h2 {
+  margin: 0 0 10px; padding: 0; border: none;
+  font-size: 16px;
+}
+.etf-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(255,255,255,0.015);
+}
+.etf-table {
+  border-collapse: collapse; width: 100%; min-width: 720px;
+  font-size: 12px;
+}
+.etf-table th, .etf-table td {
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  text-align: left; white-space: nowrap;
+}
+.etf-table th {
+  background: rgba(255,255,255,0.04); font-weight: 600;
+  color: var(--muted);
+}
+.etf-table tr:last-child td { border-bottom: none; }
+.etf-table td.num, .etf-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.etf-table td.pos { color: #ef5350; }
+.etf-table td.neg { color: #42a5f5; }
+.etf-table td.kr-name, .etf-table th.kr-name { white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
 .tf-block .charts {
   display: flex; flex-direction: column; gap: 12px;
   width: 100%; margin-bottom: 12px;

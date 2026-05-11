@@ -779,6 +779,42 @@ def run_universe_signal_scan():
         _notify_batch_error("시그널 스캔", e)
 
 
+def run_etf_screen():
+    """매일 evening — momentum_etf 프로젝트의 모멘텀 스크리닝 실행.
+    같은 Turso DB 의 etf_screen_* 테이블에 결과 저장 → stock_agent 웹
+    `/etf` 페이지에서 즉시 조회.
+    별도 venv (venv_mom_etf) 로 subprocess 호출 — 의존성 분리 유지.
+    경로/타임아웃은 ETF_SCREENER_DIR / ETF_SCREEN_TIMEOUT_SEC 로 오버라이드.
+    """
+    import subprocess
+    print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [ETF] 모멘텀 스크리닝 시작")
+    try:
+        etf_dir = Path(os.getenv("ETF_SCREENER_DIR", "D:/momentum_etf"))
+        etf_py  = etf_dir / "venv_mom_etf" / "Scripts" / "python.exe"
+        if not etf_py.exists():
+            print(f"[ETF] python.exe 미발견 ({etf_py}) — 스킵")
+            return
+        timeout_s = int(os.getenv("ETF_SCREEN_TIMEOUT_SEC", "1800"))
+        result = subprocess.run(
+            [str(etf_py), "main.py"],
+            cwd=str(etf_dir),
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            timeout=timeout_s,
+        )
+        if result.returncode == 0:
+            tail = (result.stdout or "").strip().splitlines()[-3:]
+            print("[ETF] 완료\n  " + "\n  ".join(tail))
+        else:
+            err = (result.stderr or result.stdout or "").strip()
+            print(f"[ETF] 실패 (exit {result.returncode}):\n{err[-1000:]}")
+            _notify_batch_error("ETF 모멘텀 스크리닝",
+                                 RuntimeError(f"exit {result.returncode}: {err[-300:]}"))
+    except Exception as e:
+        print(f"[ETF] 예외: {e}")
+        _notify_batch_error("ETF 모멘텀 스크리닝", e)
+
+
 def run_chart_prebuild():
     """주중 17:35 — 모든 종목 D/W/M 캔들 차트 + 엘리엇을 디스크에 미리 만들어
     웹(detail 페이지) 의 차트 응답을 즉시화. 17:30 시그널 스캔이 universe
@@ -869,12 +905,15 @@ if __name__ == "__main__":
         from market_warning import run_market_warning
         # 차트 prebuild 시각 — 시그널 스캔(17:30)이 universe 캔들을 update 한 직후
         chart_prebuild_time = os.getenv("CHART_PREBUILD_TIME", "17:35")
+        # ETF 모멘텀 스크리닝 — kr_evening + signal + prebuild 다음
+        etf_screen_time     = os.getenv("ETF_SCREEN_TIME",     "17:45")
         print(f"스케줄 모드 | 주중(월~금) "
               f"{config.MARKET_WARNING_TIME} 시장경고, "
               f"{config.MORNING_BRIEF_TIME} 모닝브리핑, "
               f"{config.EVENING_ANALYZE_TIME} 저녁분석, "
               f"{config.SIGNAL_SCAN_TIME} 시그널스캔, "
-              f"{chart_prebuild_time} 차트prebuild")
+              f"{chart_prebuild_time} 차트prebuild, "
+              f"{etf_screen_time} ETF스크리닝")
         print("Ctrl+C 로 종료\n")
         for day in ["monday", "tuesday", "wednesday", "thursday", "friday"]:
             getattr(schedule.every(), day).at(config.MARKET_WARNING_TIME).do(run_market_warning)
@@ -882,6 +921,7 @@ if __name__ == "__main__":
             getattr(schedule.every(), day).at(config.EVENING_ANALYZE_TIME).do(run_kr_evening)
             getattr(schedule.every(), day).at(config.SIGNAL_SCAN_TIME).do(run_universe_signal_scan)
             getattr(schedule.every(), day).at(chart_prebuild_time).do(run_chart_prebuild)
+            getattr(schedule.every(), day).at(etf_screen_time).do(run_etf_screen)
         while True:
             schedule.run_pending()
             time.sleep(30)

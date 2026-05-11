@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}수급 동향 — Vanguard{% endblock %}
+{% block content %}
+<h1>🌏 수급 동향</h1>
+<p class="muted">외국인·기관 누적 순매수 (1D / 3D / 1W / 1M){% if asof %} · {{ asof }} 기준{% endif %}</p>
+
+{% if not items %}
+  <p class="empty">수급 데이터 없음 — 오후 배치 실행 후 다시 확인하세요.</p>
+{% else %}
+<figure class="supply-chart">
+  <img src="/charts/supply.png?v={{ asof or 'live' }}"
+       alt="수급 동향 차트"
+       loading="eager" />
+</figure>
+
+<section class="supply-list">
+  {% for it in items %}
+    <article class="supply-card">
+      <h3>{{ it.ticker }} <span class="muted">{{ it.name }}</span></h3>
+      <div class="supply-row"><span class="role foreign">외국인</span><pre>{{ it.foreign }}</pre></div>
+      <div class="supply-row"><span class="role inst">기관</span><pre>{{ it.inst }}</pre></div>
+    </article>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}
