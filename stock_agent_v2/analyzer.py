@@ -461,7 +461,8 @@ class StockAnalyzer:
             try:
                 resp = self.claude_client.messages.create(
                     model=config.CLAUDE_MODEL,
-                    max_tokens=1200,
+                    # 6-섹션 포맷(D/W/M × 기술+일목) 전체를 담으려면 헤드룸 필요.
+                    max_tokens=2400,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return resp.content[0].text

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 import config
-from database import latest_analysis_per_ticker, load_analysis
+from database import latest_analysis_per_ticker, load_analysis, get_latest_candle_date
 from web.deps import require_user_or_redirect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -241,12 +241,17 @@ def reports_detail(analysis_id: int, request: Request):
             status_code=404,
         )
     sections, fallback_text = _build_sections(rec)
+    # 인터벌별 마지막 캔들 일자 — 분석 본문의 가격이 어느 시점 기준인지 표시용.
+    last_candles = {
+        iv: get_latest_candle_date(rec["ticker"], iv) for iv in ("D", "W", "M")
+    }
     return request.app.state.templates.TemplateResponse(
         request, "reports/detail.html",
         {
             "rec":           rec,
             "sections":      sections,
             "fallback_text": fallback_text,
+            "last_candles":  last_candles,
             "user":          u,
         },
     )

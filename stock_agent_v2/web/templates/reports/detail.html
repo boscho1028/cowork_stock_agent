@@ -30,8 +30,9 @@
     ("M", "📅", "월봉 (장기)", "E_M"),
 ] %}
   {% set s = tf.get(iv) %}
+  {% set last_d = last_candles and last_candles.get(iv) %}
   <section class="tf-block">
-    <h2>{{ icon }} {{ label }}</h2>
+    <h2>{{ icon }} {{ label }}{% if last_d %} <span class="last-candle">· 마지막 캔들 {{ last_d }}</span>{% endif %}</h2>
 
     {# 1) 기술 차트 (캔들 + MA + 거래량 + RSI) #}
     <div class="charts">

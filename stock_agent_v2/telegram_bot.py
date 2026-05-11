@@ -18,11 +18,12 @@ def _split_analysis(text: str) -> dict:
     """LLM 출력 마커 분리. 6개 블록 지원 (각 _ICHI 는 일목 차트 설명):
       ===MONTHLY===, ===MONTHLY_ICHI===, ===WEEKLY===, ===WEEKLY_ICHI===,
       ===DAILY===, ===DAILY_ICHI===
-    필수 3개 (MONTHLY/WEEKLY/DAILY) 가 없으면 빈 dict 반환 (호출자가 폴백 처리).
+    MONTHLY/WEEKLY/DAILY 중 1개라도 있으면 분할 인정 (LLM 출력이 잘리는 경우도
+    파싱된 만큼이라도 살려서 인터벌별로 표시한다). 다 없으면 빈 dict (폴백).
     _ICHI 블록은 옵셔널 — 없으면 단순히 빠진 채로 반환.
     """
     parts = _BLOCK_MARKER_RE.split(text)
-    if len(parts) < 7:
+    if len(parts) < 3:
         return {}
     blocks = {}
     for i in range(1, len(parts) - 1, 2):
@@ -30,7 +31,7 @@ def _split_analysis(text: str) -> dict:
         body = parts[i + 1].strip()
         if body:
             blocks[key] = body
-    if {"MONTHLY", "WEEKLY", "DAILY"} <= blocks.keys():
+    if blocks.keys() & {"MONTHLY", "WEEKLY", "DAILY"}:
         return blocks
     return {}
 

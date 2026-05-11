@@ -6,11 +6,24 @@ database.py - libSQL (Turso) embedded replica + SQLite 폴백
 테이블: candles / dart_disclosures / dart_reports / analysis_log / sec_filings / sec_cik_map
 """
 
+from datetime import datetime, timezone, timedelta
+
 import pandas as pd
 from pathlib import Path
 from contextlib import contextmanager
 
 import config
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _now_kst() -> str:
+    """현재 시각을 KST 'YYYY-MM-DD HH:MM:SS' 문자열로.
+    SQL 의 datetime('now','localtime') 은 Turso 클라우드(UTC) 에서 실행되면
+    UTC 가 되어버려 KST 와 9시간 어긋난다. 타임스탬프는 항상 Python 에서
+    이 함수로 만들어 파라미터로 넣는다.
+    """
+    return datetime.now(_KST).strftime("%Y-%m-%d %H:%M:%S")
 
 # libsql 바인딩 (Turso 공식, Windows prebuilt wheel 지원).
 # 미설치/미지원 환경이면 sqlite3로 자동 폴백.
@@ -480,8 +493,8 @@ def save_analysis(ticker: str, result_text: str) -> int:
     with get_conn(sync_after=True) as conn:
         cur = conn.execute("""
             INSERT INTO analysis_log (ticker, analyzed_at, result_text)
-            VALUES (?, datetime('now','localtime'), ?)
-        """, (ticker, result_text))
+            VALUES (?, ?, ?)
+        """, (ticker, _now_kst(), result_text))
         # libsql / sqlite3 양쪽에서 lastrowid 동작
         rid = cur.lastrowid
         if rid is None:
