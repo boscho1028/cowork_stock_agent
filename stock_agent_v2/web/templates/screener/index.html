@@ -84,6 +84,7 @@
               onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='실행 중...';">
           <button type="submit" class="primary">지금 실행</button>
         </form>
+        <a class="btn-link" href="/screener/{{ s.id }}/edit">편집</a>
         <form action="/screener/{{ s.id }}/toggle" method="post" style="display:inline;">
           <button type="submit">{{ '비활성화' if s.enabled else '활성화' }}</button>
         </form>

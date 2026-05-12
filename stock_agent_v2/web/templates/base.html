@@ -10,14 +10,19 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/reports">📈 Vanguard</a>
+    {% set _path = request.url.path if request else '' %}
+    {% macro nav_link(href, label) -%}
+      <a href="{{ href }}" class="{{ 'active' if _path == href or (_path.startswith(href + '/')) else '' }}">{{ label }}</a>
+    {%- endmacro %}
     <nav class="navlinks">
-      <a href="/reports">분석</a>
-      <a href="/signals">시그널</a>
-      <a href="/screener">스크리너</a>
-      <a href="/supply">수급</a>
-      <a href="/etf">ETF</a>
-      <a href="/warnings">경고</a>
-      <a href="/filings">공시</a>
+      {{ nav_link('/reports',  '분석') }}
+      {{ nav_link('/signals',  '시그널') }}
+      {{ nav_link('/screener', '스크리너') }}
+      {{ nav_link('/supply',   '수급') }}
+      {{ nav_link('/etf',      'ETF') }}
+      {{ nav_link('/market',   '한국시장') }}
+      {{ nav_link('/warnings', '경고') }}
+      {{ nav_link('/filings',  '공시') }}
     </nav>
     <form action="/logout" method="post" class="logout">
       <span class="who">{{ (user.display_name if user else request.state.username) or "" }}</span>

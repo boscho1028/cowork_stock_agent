@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}시그널 편집 — Vanguard{% endblock %}
+{% block content %}
+<a class="back" href="/screener">← 스크리너</a>
+<h1>🔧 시그널 편집</h1>
+<p class="muted">id={{ signal.id }} · 생성 {{ signal.created_at }}
+{%- if signal.last_run_at %} · 최근 실행 {{ signal.last_run_at }} (매치 {{ signal.last_match_count if signal.last_match_count is not none else 0 }}){% endif %}</p>
+
+<section class="screener-block">
+  <form action="/screener/{{ signal.id }}/update" method="post" class="screener-form"
+        onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='저장 중...';">
+    <label>
+      이름
+      <input type="text" name="name" required maxlength="80"
+             value="{{ signal.name }}" />
+    </label>
+    <label>
+      자연어 정의
+      <textarea name="prompt" required rows="5">{{ signal.prompt }}</textarea>
+    </label>
+    <div class="row">
+      <label class="inline">
+        범위
+        <select name="scope">
+          <option value="portfolio" {% if signal.scope == 'portfolio' %}selected{% endif %}>portfolio (18종목)</option>
+          <option value="universe"  {% if signal.scope == 'universe' %}selected{% endif %}>universe (76종목)</option>
+        </select>
+      </label>
+      <label class="inline checkbox">
+        <input type="checkbox" name="enabled" {% if signal.enabled %}checked{% endif %} />
+        매일 07:30 자동 실행
+      </label>
+    </div>
+    <div class="row buttons">
+      <a class="link-cancel" href="/screener">취소</a>
+      <button type="submit" class="primary">저장</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

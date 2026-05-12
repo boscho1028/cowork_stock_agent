@@ -13,7 +13,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from database import (
-    create_nl_signal, list_nl_signals, get_nl_signal,
+    create_nl_signal, list_nl_signals, get_nl_signal, update_nl_signal,
     set_nl_signal_enabled, delete_nl_signal,
 )
 from web.deps import require_user_or_redirect
@@ -115,6 +115,43 @@ def screener_run_adhoc(
         "total":         len(results),
         "user":          u,
     })
+
+
+@router.get("/screener/{signal_id}/edit")
+def screener_edit_form(signal_id: int, request: Request):
+    u = require_user_or_redirect(request)
+    if isinstance(u, RedirectResponse):
+        return u
+    sig = get_nl_signal(signal_id)
+    if not sig:
+        raise HTTPException(404, "signal not found")
+    return _render(request, "screener/edit.html",
+                   {"signal": sig, "user": u})
+
+
+@router.post("/screener/{signal_id}/update")
+def screener_update(
+    signal_id: int,
+    request: Request,
+    name:   str = Form(...),
+    prompt: str = Form(...),
+    scope:  str = Form("portfolio"),
+    enabled: str = Form(""),
+):
+    u = require_user_or_redirect(request)
+    if isinstance(u, RedirectResponse):
+        return u
+    sig = get_nl_signal(signal_id)
+    if not sig:
+        raise HTTPException(404, "signal not found")
+    name = name.strip()
+    prompt = prompt.strip()
+    if not name or not prompt:
+        raise HTTPException(400, "name/prompt required")
+    if scope not in ("portfolio", "universe"):
+        scope = "portfolio"
+    update_nl_signal(signal_id, name, prompt, scope, enabled=bool(enabled))
+    return RedirectResponse(url="/screener", status_code=303)
 
 
 @router.post("/screener/{signal_id}/toggle")

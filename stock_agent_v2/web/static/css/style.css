@@ -39,8 +39,16 @@ a:hover { text-decoration: underline; }
 .brand { font-weight: 700; font-size: 16px; color: var(--text); }
 .brand:hover { text-decoration: none; opacity: 0.85; }
 .navlinks { display: flex; gap: 14px; flex: 1; flex-wrap: wrap; }
-.navlinks a { color: var(--muted); }
+.navlinks a {
+  color: var(--muted); padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
 .navlinks a:hover { color: var(--text); text-decoration: none; }
+.navlinks a.active {
+  color: var(--text); font-weight: 600;
+  border-bottom-color: #42a5f5;
+}
 
 .logout { display: flex; align-items: center; gap: 8px; }
 .logout .who { color: var(--muted); font-size: 13px; }
@@ -359,6 +367,82 @@ pre.report-body, pre.warning-body {
 }
 .screener-actions button.primary { background: #1565c0; border-color: #1565c0; color: #fff; }
 .screener-actions button.danger  { color: #ef5350; border-color: #ef5350; }
+.screener-actions .btn-link {
+  display: inline-block; padding: 5px 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(255,255,255,0.05); color: var(--text);
+  font-size: 12px; text-decoration: none;
+}
+.screener-actions .btn-link:hover { background: rgba(255,255,255,0.1); }
+.screener-form .link-cancel {
+  display: inline-block; padding: 6px 14px;
+  color: var(--muted); text-decoration: none;
+  font-size: 13px;
+}
+.screener-form .link-cancel:hover { color: var(--text); }
+
+/* 페이지 헤더 (h1 + 우측 버튼) */
+.page-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.page-head h1 { margin: 0; }
+.refresh-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(255,255,255,0.05); color: var(--text);
+  cursor: pointer; font-size: 13px; font: inherit;
+}
+.refresh-btn:hover { background: rgba(255,255,255,0.1); }
+.refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* 한국 시장 페이지 (stockeasy) */
+.market-section { margin: 18px 0 22px; }
+.market-section h2 { font-size: 16px; margin: 0 0 8px; padding: 0; border: none; }
+.market-subhead { font-size: 13px; color: var(--muted); margin: 14px 0 6px; padding: 0; border: none; }
+.market-status-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.status-card {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; background: rgba(255,255,255,0.02);
+}
+.status-card h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); border: none; padding: 0; }
+.status-card .big-value { font-size: 18px; font-weight: 600; margin: 4px 0; }
+.status-card .status-label { font-size: 16px; margin: 6px 0; }
+.status-card .status-exposure { font-size: 12px; color: var(--muted); margin: 2px 0; }
+.status-card.status-confirmed_uptrend { border-color: rgba(76,175,80,0.5); background: rgba(76,175,80,0.06); }
+.status-card.status-uptrend_under_pressure { border-color: rgba(255,167,38,0.5); background: rgba(255,167,38,0.05); }
+.status-card.status-rally_attempt { border-color: rgba(66,165,245,0.5); background: rgba(66,165,245,0.05); }
+.status-card.status-market_in_correction { border-color: rgba(239,83,80,0.5); background: rgba(239,83,80,0.06); }
+.status-card .pos, .market-status-grid .pos { color: #ef5350; }
+.status-card .neg, .market-status-grid .neg { color: #42a5f5; }
+
+.commodity-grid {
+  display: grid; gap: 4px 12px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  font-size: 12px;
+}
+.commodity-item {
+  display: grid; grid-template-columns: 1fr auto auto;
+  gap: 6px; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(255,255,255,0.015);
+}
+.commodity-item .c-name { color: var(--text); }
+.commodity-item .c-price { font-variant-numeric: tabular-nums; color: var(--muted); }
+.commodity-item .c-chg.pos { color: #ef5350; }
+.commodity-item .c-chg.neg { color: #42a5f5; }
+
+.dram-holdings {
+  border-collapse: collapse; width: 100%; max-width: 720px;
+  font-size: 12px; margin-top: 6px;
+}
+.dram-holdings th, .dram-holdings td {
+  padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left;
+}
+.dram-holdings th { color: var(--muted); font-weight: 600; }
+.dram-holdings td.num, .dram-holdings th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .tf-block .charts {
   display: flex; flex-direction: column; gap: 12px;

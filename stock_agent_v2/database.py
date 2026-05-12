@@ -580,6 +580,18 @@ def set_nl_signal_enabled(signal_id: int, enabled: bool) -> None:
                      (1 if enabled else 0, signal_id))
 
 
+def update_nl_signal(signal_id: int, name: str, prompt: str,
+                      scope: str = "portfolio", enabled: bool = True) -> None:
+    """저장된 NL 시그널 편집."""
+    scope = scope if scope in ("portfolio", "universe") else "portfolio"
+    with get_conn(sync_after=True) as conn:
+        conn.execute("""
+            UPDATE nl_signals
+            SET name=?, prompt=?, scope=?, enabled=?
+            WHERE id=?
+        """, (name, prompt, scope, 1 if enabled else 0, signal_id))
+
+
 def delete_nl_signal(signal_id: int) -> None:
     with get_conn(sync_after=True) as conn:
         conn.execute("DELETE FROM nl_signals WHERE id=?", (signal_id,))

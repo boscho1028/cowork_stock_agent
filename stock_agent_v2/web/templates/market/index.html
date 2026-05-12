@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}한국 시장 — Vanguard{% endblock %}
+
+{% macro pct_class(v) -%}
+{%- if v is none %}{% elif v > 0 %}pos{% elif v < 0 %}neg{% endif %}
+{%- endmacro %}
+
+{% macro fmt_pct(v) -%}
+{%- if v is none %}—{% else %}{{ '%+.2f%%'|format(v) }}{%- endif %}
+{%- endmacro %}
+
+{% macro fmt_num(v, digits=2) -%}
+{%- if v is none %}—{% else %}{{ '{:,.{}f}'.format(v, digits) }}{%- endif %}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <h1>🇰🇷 한국 시장</h1>
+  <button type="button" class="refresh-btn" onclick="this.disabled=true; this.textContent='⏳ 새로고침 중...'; window.location.reload();" title="stockeasy 에서 최신 데이터를 다시 가져옵니다">🔄 새로고침</button>
+</div>
+<p class="muted">stockeasy.intellio.kr 데이터 — 매 요청 시 실시간 조회</p>
+
+{# ── 시장 단계 (KOSPI/KOSDAQ status) ───────────────────────────────── #}
+{% if status %}
+<section class="market-section">
+  <h2>시장 단계</h2>
+  <div class="market-status-grid">
+    {% for s in status %}
+    <article class="status-card status-{{ s.status }}">
+      <h3>{{ s.market }}</h3>
+      <p class="status-label"><strong>{{ s.label }}</strong></p>
+      <p class="status-exposure">권장 익스포저: {{ s.exposure }}</p>
+      <p class="muted small">분배일 {{ s.active_distribution_count }}개 · 랠리 {{ s.rally_day_count }}일</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ── 지수 + 시장 신호 ───────────────────────────────────────────────── #}
+{% if indices %}
+<section class="market-section">
+  <h2>지수 + 시장 신호</h2>
+  <div class="market-status-grid">
+    {% for it in indices.indices %}
+    <article class="status-card">
+      <h3>{{ it.name }}</h3>
+      <p class="big-value">{{ fmt_num(it.value) }}
+        <span class="{{ pct_class(it.change_pct) }}">{{ fmt_pct(it.change_pct) }}</span>
+      </p>
+      <p class="muted small">
+        상승 <span class="pos">{{ it.advance or 0 }}</span>
+        · 하락 <span class="neg">{{ it.decline or 0 }}</span>
+        · 보합 {{ it.unchanged or 0 }}
+        {%- if it.listed %} <span class="muted">/ {{ it.listed }}</span>{% endif %}
+      </p>
+      {% if it.upper_limit or it.lower_limit %}
+      <p class="muted small">
+        상한 <span class="pos">{{ it.upper_limit or 0 }}</span>
+        · 하한 <span class="neg">{{ it.lower_limit or 0 }}</span>
+      </p>
+      {% endif %}
+    </article>
+    {% endfor %}
+    <article class="status-card">
+      <h3>시장 신호</h3>
+      <p>단기:
+        {% if indices.short_term == 'green' %}🟢
+        {% elif indices.short_term == 'yellow' %}🟡
+        {% elif indices.short_term == 'red' %}🔴
+        {% else %}{{ indices.short_term or '?' }}{% endif %}
+      </p>
+      <p>장기:
+        {% if indices.long_term == 'green' %}🟢
+        {% elif indices.long_term == 'yellow' %}🟡
+        {% elif indices.long_term == 'red' %}🔴
+        {% else %}{{ indices.long_term or '?' }}{% endif %}
+      </p>
+    </article>
+  </div>
+</section>
+{% endif %}
+
+{# ── 신용잔고 ────────────────────────────────────────────────────────── #}
+{% if credit %}
+<section class="market-section">
+  <h2>신용잔고 추이</h2>
+  <p class="muted small">{{ credit.start_date }} ~ {{ credit.end_date }} ({{ credit.total_count }}일)</p>
+  <div class="market-status-grid">
+    <article class="status-card">
+      <h3>최신 ({{ credit.last.date }})</h3>
+      <p class="big-value">{{ '{:,}'.format(credit.last.total_credit) }} 억</p>
+      <p class="muted small">
+        KOSPI {{ '{:,}'.format(credit.last.kospi_credit) }} ·
+        KOSDAQ {{ '{:,}'.format(credit.last.kosdaq_credit) }}
+      </p>
+    </article>
+    <article class="status-card">
+      <h3>20일 변화</h3>
+      <p class="big-value {{ 'pos' if credit.delta > 0 else 'neg' if credit.delta < 0 else '' }}">
+        {{ '{:+,d}'.format(credit.delta) }} 억
+      </p>
+      <p class="muted small">시작 {{ credit.first.date }}: {{ '{:,}'.format(credit.first.total_credit) }} 억</p>
+    </article>
+    <article class="status-card">
+      <h3>예탁금</h3>
+      <p class="big-value">{{ '{:,}'.format(credit.last.investor_deposit) }} 억</p>
+    </article>
+  </div>
+</section>
+{% endif %}
+
+{# ── 원자재 ──────────────────────────────────────────────────────────── #}
+{% if commodities %}
+<section class="market-section">
+  <h2>원자재 시세</h2>
+  {% for cat in commodities %}
+    {% if cat.rows %}
+    <h3 class="market-subhead">{{ cat.label }}</h3>
+    <div class="commodity-grid">
+      {% for it in cat.rows %}
+      <div class="commodity-item">
+        <span class="c-name">{{ it.name }}</span>
+        <span class="c-price">{{ fmt_num(it.price, 2) }}</span>
+        <span class="c-chg {{ pct_class(it.change_percent) }}">{{ fmt_pct(it.change_percent) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endif %}
+
+{# ── DRAM ETF ────────────────────────────────────────────────────────── #}
+{% if dram %}
+<section class="market-section">
+  <h2>DRAM ETF · {{ dram.fund_name }}</h2>
+  <p class="muted small">메모리 가격 사이클 indicator · {{ dram.latest_date }}</p>
+  <div class="market-status-grid">
+    <article class="status-card">
+      <h3>현재가 / NAV</h3>
+      <p class="big-value">${{ fmt_num(dram.current_price) }}</p>
+      <p class="muted small">NAV ${{ fmt_num(dram.current_nav) }}</p>
+    </article>
+    <article class="status-card">
+      <h3>AUM</h3>
+      <p class="big-value">${{ '{:,.0f}'.format((dram.current_aum or 0) / 1e6) }}M</p>
+    </article>
+  </div>
+
+  {% if dram.holdings %}
+  <h3 class="market-subhead">보유 상위 {{ dram.holdings|length }}</h3>
+  <table class="dram-holdings">
+    <thead>
+      <tr><th>티커</th><th>이름</th><th class="num">가중치</th><th class="num">시가총액(USD)</th></tr>
+    </thead>
+    <tbody>
+      {% for h in dram.holdings %}
+      <tr>
+        <td>{{ h.ticker }}</td>
+        <td>{{ h.name }}</td>
+        <td class="num">{{ fmt_pct((h.weight or 0) * 100 if (h.weight or 0) < 1 else h.weight) }}</td>
+        <td class="num">${{ '{:,.0f}'.format((h.market_value or 0)) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if not (status or indices or credit or commodities or dram) %}
+<p class="empty">데이터 없음 — stockeasy.intellio.kr 응답 실패. 잠시 후 다시 시도하세요.</p>
+{% endif %}
+{% endblock %}
