@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}미국 매크로 — Vanguard{% endblock %}
+
+{% macro pct_class(v) -%}
+{%- if v is none %}{% elif v > 0 %}pos{% elif v < 0 %}neg{% endif %}
+{%- endmacro %}
+
+{% macro fmt_pct(v) -%}
+{%- if v is none %}—{% else %}{{ '%+.2f%%'|format(v) }}{%- endif %}
+{%- endmacro %}
+
+{% macro fmt_num(v, digits=2) -%}
+{%- if v is none %}—{% else %}{{ '{:,.{}f}'.format(v, digits) }}{%- endif %}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <h1>🇺🇸 미국 매크로 시그널</h1>
+  <a class="refresh-btn" href="/macro?force=1" title="yfinance·CNN F&G 즉시 재호출">🔄 새로고침</a>
+</div>
+<p class="muted">전 영업일 종가 대비 변동률 · {{ data.asof }} 캐싱 (TTL {{ ttl_sec }}s)</p>
+
+{# ── CNN Fear & Greed Index ───────────────────────────────────────── #}
+{% if data.fg.available %}
+<section class="market-section">
+  <h2>CNN Fear &amp; Greed Index</h2>
+  <div class="market-status-grid">
+    <article class="status-card fg-level-{{ data.fg.level }}">
+      <h3>현재</h3>
+      <p class="big-value">{{ data.fg.score }}
+        <span class="fg-rating">{{ data.fg.rating }}</span>
+      </p>
+      <p class="muted small">
+        전일 {{ data.fg.prev_close }} · 1주 {{ data.fg.prev_1week }} · 1개월 {{ data.fg.prev_1month }}
+      </p>
+    </article>
+  </div>
+</section>
+{% else %}
+<section class="market-section">
+  <h2>CNN Fear &amp; Greed Index</h2>
+  <p class="empty">데이터 없음 · {{ data.fg.reason or 'unknown' }}</p>
+</section>
+{% endif %}
+
+{# ── 시세 섹션들 ─────────────────────────────────────────────────── #}
+{% for sec in data.sections %}
+  {% if sec.cards %}
+  <section class="market-section">
+    <h2>{{ sec.label }}</h2>
+    <div class="market-status-grid">
+      {% for it in sec.cards %}
+      <article class="status-card{% if it.level %} fg-level-{{ it.level }}{% endif %}">
+        <h3>{{ it.name }} <span class="muted">{{ it.ticker }}</span></h3>
+        <p class="big-value">{{ fmt_num(it.price) }}
+          <span class="{{ pct_class(it.change_pct) }}">{{ fmt_pct(it.change_pct) }}</span>
+        </p>
+        {% if it.signal %}<p class="muted small">{{ it.signal }}</p>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+{% endfor %}
+
+{% endblock %}
