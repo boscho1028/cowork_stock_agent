@@ -38,5 +38,35 @@
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+
+  {# 차트 확대 modal — 차트 이미지 클릭 시 풀화면 오버레이 표시 #}
+  <div id="img-modal" class="img-modal no-print" hidden>
+    <img id="img-modal-content" alt="" />
+    <span class="img-modal-close" aria-label="닫기">×</span>
+  </div>
+  <script>
+  (function () {
+    const modal = document.getElementById('img-modal');
+    const target = document.getElementById('img-modal-content');
+    // 차트가 들어있는 컨테이너 안의 img 만 대상
+    const selectors = [
+      '.charts img',          // /reports detail (캔들/일목/엘리엇)
+      '.supply-chart img',    // /supply 수급 차트
+    ].join(',');
+    document.querySelectorAll(selectors).forEach(img => {
+      img.style.cursor = 'zoom-in';
+      img.addEventListener('click', () => {
+        target.src = img.src;
+        target.alt = img.alt || '';
+        modal.hidden = false;
+      });
+    });
+    function close() { modal.hidden = true; target.src = ''; }
+    modal.addEventListener('click', close);
+    document.addEventListener('keydown', e => {
+      if (!modal.hidden && e.key === 'Escape') close();
+    });
+  })();
+  </script>
 </body>
 </html>

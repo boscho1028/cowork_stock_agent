@@ -140,7 +140,7 @@ def generate_supply_chart(rows: list, asof: str = "") -> bytes | None:
                 ha = "left" if v > 0 else "right"
                 ax.text(x, bar.get_y() + bar.get_height() / 2,
                         _fmt_amt_short(v), va="center", ha=ha,
-                        color=C["text"], fontsize=8)
+                        color=C["text"], fontsize=11)
 
         ax.set_yticks(y)
         ax.set_yticklabels(labels, color=C["text"])
@@ -153,15 +153,15 @@ def generate_supply_chart(rows: list, asof: str = "") -> bytes | None:
         ax.set_xticks([])
         ax.tick_params(axis="x", colors=C["subtext"])
         ax.set_xlim(-max_abs * 1.18, max_abs * 1.18)
-        ax.set_title(lbl, color=C["text"], fontsize=11, loc="left", pad=6)
+        ax.set_title(lbl, color=C["text"], fontsize=14, loc="left", pad=6)
 
     axes[0][0].legend(loc="lower right", facecolor=C["panel"],
-                      edgecolor=C["grid"], labelcolor=C["text"], fontsize=8)
+                      edgecolor=C["grid"], labelcolor=C["text"], fontsize=11)
 
     sup_title = "수급 동향 (외국인·기관 누적 순매수)"
     if asof:
         sup_title += f"  ·  {asof} 기준"
-    fig.suptitle(sup_title, color=C["text"], fontsize=12, x=0.06, ha="left")
+    fig.suptitle(sup_title, color=C["text"], fontsize=16, x=0.06, ha="left")
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     buf = io.BytesIO()
@@ -274,7 +274,7 @@ def generate_chart(
 
     for ax in axes:
         ax.set_facecolor(C["panel"])
-        ax.tick_params(colors=C["text"], labelsize=7.5)
+        ax.tick_params(colors=C["text"], labelsize=10)
         ax.yaxis.tick_right()
         ax.grid(color=C["grid"], linewidth=0.4, alpha=0.6)
         for spine in ax.spines.values():
@@ -383,12 +383,12 @@ def generate_chart(
                   f"전환 {sf(t_val)}  기준 {sf(k_val)}\n"
                   f"선행A {sf(sa_val)}  선행B {sf(sb_val)}\n{cloud_txt}",
                   transform=ax_c.transAxes, ha="right", va="top",
-                  color=cloud_col, fontsize=7,
+                  color=cloud_col, fontsize=10,
                   bbox=dict(boxstyle="round,pad=0.3", facecolor=C["panel"],
                             alpha=0.8, edgecolor=C["grid"]))
 
     # 범례
-    ax_c.legend(loc="upper left", fontsize=6.5, ncol=5,
+    ax_c.legend(loc="upper left", fontsize=9, ncol=5,
                 facecolor=C["panel"], labelcolor=C["text"],
                 edgecolor=C["grid"], framealpha=0.85)
 
@@ -401,7 +401,7 @@ def generate_chart(
     ax_c.set_title(
         f"[{interval_lbl}{title_suffix}]  {name}({ticker})   {curr:,.0f}   {sign}{chg:.2f}%   "
         f"[{df.index[-1].strftime('%Y-%m-%d')} 기준  |  {n}봉]",
-        color=C["text"], fontsize=10, pad=7, loc="left",
+        color=C["text"], fontsize=13, pad=7, loc="left",
     )
 
     # y축 범위
@@ -419,7 +419,7 @@ def generate_chart(
             col = C["vol_bull"] if row["close"] >= row["open"] else C["vol_bear"]
             ax_v.bar(i, row["volume"], color=col, width=0.7, alpha=0.85)
         ax_v.plot(xs, df["volume"].rolling(20).mean(), color=MA_COLORS[20], lw=0.9, alpha=0.8)
-        ax_v.set_ylabel("VOL", color=C["subtext"], fontsize=7, labelpad=2)
+        ax_v.set_ylabel("VOL", color=C["subtext"], fontsize=10, labelpad=2)
 
         def vol_fmt(x, _):
             if x >= 1e8: return f"{x/1e8:.0f}억"
@@ -441,13 +441,13 @@ def generate_chart(
             rsi_col = C["rsi_ob"] if curr_rsi >= ob_line else (C["rsi_os"] if curr_rsi <= os_line else C["rsi_line"])
             ax_r.annotate(f"RSI {curr_rsi:.1f}", xy=(n-1, curr_rsi),
                           xytext=(n-14, curr_rsi + (7 if curr_rsi < 75 else -10)),
-                          color=rsi_col, fontsize=7.5, fontweight="bold",
+                          color=rsi_col, fontsize=10.5, fontweight="bold",
                           arrowprops=dict(arrowstyle="-", color=rsi_col, lw=0.5))
 
         ax_r.set_ylim(0, 100)
         ax_r.set_yticks([os_line, 50, ob_line])
-        ax_r.set_ylabel("RSI", color=C["subtext"], fontsize=7, labelpad=2)
-        ax_r.legend(loc="upper left", fontsize=6.5, ncol=2,
+        ax_r.set_ylabel("RSI", color=C["subtext"], fontsize=10, labelpad=2)
+        ax_r.legend(loc="upper left", fontsize=9, ncol=2,
                     facecolor=C["panel"], labelcolor=C["text"],
                     edgecolor=C["grid"], framealpha=0.85)
 
@@ -458,14 +458,14 @@ def generate_chart(
     bottom_ax = ax_r if not is_ichi_mode else ax_c
     bottom_ax.set_xticks(ticks)
     bottom_ax.set_xticklabels([df.index[i].strftime("%m/%d") for i in ticks],
-                              color=C["text"], fontsize=7.5)
+                              color=C["text"], fontsize=10.5)
     if not is_ichi_mode:
         plt.setp(ax_c.get_xticklabels(), visible=False)
         plt.setp(ax_v.get_xticklabels(), visible=False)
     ax_c.set_xlim(-1, total_w)
 
     fig.text(0.995, 0.005, "Vanguard", ha="right", va="bottom",
-             color=C["grid"], fontsize=7, alpha=0.4)
+             color=C["grid"], fontsize=10, alpha=0.4)
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=130, bbox_inches="tight",
@@ -525,7 +525,7 @@ def generate_elliott_chart(
     fig = plt.figure(figsize=(14, 7), facecolor=C["bg"])
     ax = fig.add_subplot(111)
     ax.set_facecolor(C["panel"])
-    ax.tick_params(colors=C["text"], labelsize=8)
+    ax.tick_params(colors=C["text"], labelsize=11)
     ax.yaxis.tick_right()
     ax.grid(color=C["grid"], linewidth=0.4, alpha=0.6)
     for spine in ax.spines.values():
@@ -561,7 +561,7 @@ def generate_elliott_chart(
             y = fib_bot + fib_rng * lv
         ax.axhline(y, color="#9e9e9e", lw=0.5, linestyle="--", alpha=0.35, zorder=2)
         ax.text(n - 0.5, y, f"  {lv*100:.1f}%",
-                color="#9e9e9e", fontsize=7, va="center", ha="left", alpha=0.7)
+                color="#9e9e9e", fontsize=10, va="center", ha="left", alpha=0.7)
 
     # ── 2-4 추세선 + 1-3 평행 채널 ─────────────────────────────
     p1 = pts_rel[1]; p2 = pts_rel[2]; p4 = pts_rel[4]
@@ -599,7 +599,7 @@ def generate_elliott_chart(
             xy=(p["rx"], p["price"]),
             xytext=(0, offy), textcoords="offset points",
             ha="center", va="center",
-            color="black", fontsize=10, fontweight="bold",
+            color="black", fontsize=13, fontweight="bold",
             bbox=dict(boxstyle="circle,pad=0.35", facecolor=wave_color,
                       edgecolor="black", linewidth=0.8),
             zorder=11,
@@ -611,7 +611,7 @@ def generate_elliott_chart(
              f"{direction_lbl} | {elliott['current_wave']}   "
              f"등급 {elliott['grade']} | 신뢰도 {elliott['confidence']}/100   "
              f"[{df_range.index[-1].strftime('%Y-%m-%d')} 기준 | {n}봉]")
-    ax.set_title(title, color=C["text"], fontsize=10, pad=8, loc="left")
+    ax.set_title(title, color=C["text"], fontsize=13, pad=8, loc="left")
 
     # ── 점수 박스 (좌상단) ────────────────────────────────────
     sc = elliott["scores"]
@@ -624,7 +624,7 @@ def generate_elliott_chart(
     )
     ax.text(0.005, 0.985, info_txt,
             transform=ax.transAxes, ha="left", va="top",
-            color=C["text"], fontsize=7.5,
+            color=C["text"], fontsize=10.5,
             bbox=dict(boxstyle="round,pad=0.35", facecolor=C["panel"],
                       edgecolor=C["grid"], alpha=0.85))
 
@@ -635,7 +635,7 @@ def generate_elliott_chart(
         warn_txt = "\n".join(f"[!] {w.replace('⚠ ', '')}" for w in warns[:3])
         ax.text(0.995, 0.985, warn_txt,
                 transform=ax.transAxes, ha="right", va="top",
-                color="#ffb74d", fontsize=7.5,
+                color="#ffb74d", fontsize=10.5,
                 bbox=dict(boxstyle="round,pad=0.35", facecolor=C["panel"],
                           edgecolor="#ffb74d", alpha=0.85))
 
@@ -650,15 +650,15 @@ def generate_elliott_chart(
     ticks = list(range(0, n, step))
     ax.set_xticks(ticks)
     ax.set_xticklabels([df_range.index[i].strftime("%m/%d") for i in ticks],
-                       color=C["text"], fontsize=7.5)
+                       color=C["text"], fontsize=10.5)
     ax.set_xlim(-1, n + 2)
 
-    ax.legend(loc="lower left", fontsize=7, ncol=3,
+    ax.legend(loc="lower left", fontsize=10, ncol=3,
               facecolor=C["panel"], labelcolor=C["text"],
               edgecolor=C["grid"], framealpha=0.85)
 
     fig.text(0.995, 0.005, "Stock AI Agent · Elliott PoC",
-             ha="right", va="bottom", color=C["grid"], fontsize=7, alpha=0.4)
+             ha="right", va="bottom", color=C["grid"], fontsize=10, alpha=0.4)
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=130, bbox_inches="tight",
@@ -672,7 +672,7 @@ def _error_image(ticker: str, msg: str) -> bytes:
     fig, ax = plt.subplots(figsize=(6, 2), facecolor=C["bg"])
     ax.set_facecolor(C["bg"])
     ax.text(0.5, 0.5, f"{ticker}: {msg}", ha="center", va="center",
-            color=C["text"], fontsize=12)
+            color=C["text"], fontsize=16)
     ax.axis("off")
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=C["bg"])

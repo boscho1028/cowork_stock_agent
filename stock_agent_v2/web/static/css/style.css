@@ -270,6 +270,27 @@ pre.report-body, pre.warning-body {
 .supply-row .role.foreign { color: #42a5f5; }
 .supply-row .role.inst    { color: #ffa726; }
 
+/* 차트 확대 modal (lightbox) — base.html 의 #img-modal */
+.img-modal[hidden] { display: none; }
+.img-modal {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out; padding: 20px;
+}
+.img-modal img {
+  max-width: 95vw; max-height: 95vh;
+  object-fit: contain;
+  background: #0e1117; border-radius: 4px;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.6);
+}
+.img-modal-close {
+  position: absolute; top: 14px; right: 22px;
+  color: #fff; font-size: 36px; font-weight: 300;
+  line-height: 1; cursor: pointer; user-select: none;
+}
+.img-modal-close:hover { color: #ef5350; }
+
 /* 상태 배너 (지연·에러·실행 중 표시) */
 .status-banner {
   display: flex; gap: 10px; align-items: flex-start;
