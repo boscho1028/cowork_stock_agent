@@ -299,13 +299,10 @@ def cmd_analyze(tickers=None, header="", primary=None, header_photo=None):
 
     if all_results:
         if os.getenv("WEB_ONLY") == "1":
-            # 한 줄 알림: 본문/차트는 웹에서 보고, 텔레그램은 미리보기만.
-            err_part = f" | 실패 {err_cnt}건" if err_cnt else ""
-            summary  = (
-                f"📊 분석 완료 — {ok_cnt}종목{err_part}"
-                + (f"\n{header}" if header else "")
-            )
-            notifier.send_brief(summary, path="/reports")
+            # 한 줄 알림 — 본문·차트·수급 요약은 모두 웹에서. 텔레그램은 완료 통지만.
+            err_part = f" (실패 {err_cnt})" if err_cnt else ""
+            notifier.send_brief(f"✅ 분석 업데이트 완료 — {ok_cnt}종목{err_part}",
+                                 path="/reports")
         else:
             notifier.send_batch(all_results, header=full_header, header_photo=header_photo)
 
@@ -445,7 +442,11 @@ def cmd_weekly_report(primary=None):
         f.write("\n\n".join(lines))
     print(f"  [저장] {report_path}")
 
-    notifier.send_batch(results, header="[WEEKLY] 주간 전략 리포트")
+    if os.getenv("WEB_ONLY") == "1":
+        notifier.send_brief(f"📅 주간 리포트 완료 — {len(results)}종목",
+                             path="/reports")
+    else:
+        notifier.send_batch(results, header="[WEEKLY] 주간 전략 리포트")
     print("[OK] 주간 리포트 완료")
 
 
@@ -665,11 +666,17 @@ def run_morning_brief():
                         out.append(f"📰 {t}\n   {l}")
             rendered_sections.append("\n".join(out))
 
-        header = (f"[BRIEF] 모닝 브리핑 | "
-                  f"{datetime.now().strftime('%m/%d %H:%M')}")
-        TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID).send(
-            "\n\n".join([header] + rendered_sections)
-        )
+        notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
+        if os.getenv("WEB_ONLY") == "1":
+            # 본문(DART/SEC 공시) 은 웹 /filings 에서 확인. 텔레그램은 완료 통지만.
+            notifier.send_brief(
+                f"🌅 모닝 브리핑 완료 — 공시 {len(blocks_for_llm)}건",
+                path="/filings",
+            )
+        else:
+            header = (f"[BRIEF] 모닝 브리핑 | "
+                      f"{datetime.now().strftime('%m/%d %H:%M')}")
+            notifier.send("\n\n".join([header] + rendered_sections))
         print("[OK] 모닝 브리핑 완료")
 
         # ── 미국 AI 분석 (장 마감 후 전일 종가 기준, 포트폴리오 US 전종목) ──
