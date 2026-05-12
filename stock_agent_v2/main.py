@@ -668,11 +668,30 @@ def run_morning_brief():
 
         notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
         if os.getenv("WEB_ONLY") == "1":
-            # 본문(DART/SEC 공시) 은 웹 /filings 에서 확인. 텔레그램은 완료 통지만.
-            notifier.send_brief(
-                f"🌅 모닝 브리핑 완료 — 공시 {len(blocks_for_llm)}건",
-                path="/filings",
-            )
+            # 본문은 웹 /filings 에서. 텔레그램은 새 공시 있는 종목 한 줄 요약만.
+            flag = {"US": "🇺🇸", "KR": "🇰🇷"}
+            filing_lines = []
+            for b in blocks_for_llm:
+                if not b.get("items"):
+                    continue
+                head = f"· {flag.get(b['market'], '')} {b['ticker']} {b['name']}"
+                # LLM 한 줄 요약 우선, 없으면 items 첫 줄
+                summary = ticker_summary.get(b["ticker"])
+                if not summary and b["items"]:
+                    summary = b["items"][0]
+                if summary:
+                    summary = summary.strip().replace("\n", " ")[:120]
+                    filing_lines.append(f"{head} — {summary}")
+                else:
+                    filing_lines.append(head)
+            if filing_lines:
+                shown = filing_lines[:10]
+                more = f"\n... 외 {len(filing_lines) - 10}건" if len(filing_lines) > 10 else ""
+                msg = (f"🌅 모닝 브리핑 완료 — 새 공시 {len(filing_lines)}종목\n\n"
+                       + "\n".join(shown) + more)
+            else:
+                msg = "🌅 모닝 브리핑 완료 — 새 공시 없음"
+            notifier.send_brief(msg, path="/filings")
         else:
             header = (f"[BRIEF] 모닝 브리핑 | "
                       f"{datetime.now().strftime('%m/%d %H:%M')}")
@@ -934,6 +953,31 @@ def run_kr_evening():
             header = f"{header}\n\n{supply}"
 
         cmd_analyze(tickers=kr_tickers, header=header, header_photo=supply_chart)
+        # 오늘 새로 들어온 DART 공시 있으면 텔레그램에 한 줄 요약 첨부 (WEB_ONLY 모드).
+        if os.getenv("WEB_ONLY") == "1":
+            try:
+                from database import load_disclosures
+                today_ymd = datetime.now().strftime("%Y%m%d")
+                lines = []
+                for t in kr_tickers:
+                    info = (config.get_portfolio_detail().get(t) or {})
+                    name = info.get("name", t)
+                    for r in load_disclosures(t, limit=3, since_date=today_ymd):
+                        report = (r.get("report_nm") or "").strip()[:80]
+                        if report:
+                            lines.append(f"· 🇰🇷 {t} {name} — {report}")
+                if lines:
+                    body = "\n".join(lines[:10])
+                    if len(lines) > 10:
+                        body += f"\n... 외 {len(lines) - 10}건"
+                    TelegramNotifier(
+                        config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID
+                    ).send_brief(
+                        f"📋 오늘 DART 공시 — {len(lines)}건\n\n{body}",
+                        path="/filings",
+                    )
+            except Exception as e:
+                print(f"[EVENING] DART 공시 요약 실패: {e}")
         batch_finish(bid, "success",
                       f"KR 분석 {len(kr_tickers)}종목 + 수급 + 공시 완료")
     except Exception as e:
