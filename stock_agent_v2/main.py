@@ -823,15 +823,30 @@ def run_etf_screen():
     같은 Turso DB 의 etf_screen_* 테이블에 결과 저장 → stock_agent 웹
     `/etf` 페이지에서 즉시 조회.
     별도 venv (venv_mom_etf) 로 subprocess 호출 — 의존성 분리 유지.
-    경로/타임아웃은 ETF_SCREENER_DIR / ETF_SCREEN_TIMEOUT_SEC 로 오버라이드.
+    환경변수:
+      ETF_ENABLED=0        — 전체 비활성 (Docker/Linux 배포 시 momentum_etf
+                              repo 가 없으면 끔). 기본 1.
+      ETF_SCREENER_DIR     — momentum_etf 위치 (Windows 기본 D:/momentum_etf)
+      ETF_SCREENER_PYTHON  — venv 파이썬 직접 지정 (Linux 에서는 .../bin/python)
+      ETF_SCREEN_TIMEOUT_SEC — 기본 1800
     """
+    if os.getenv("ETF_ENABLED", "1") == "0":
+        print("[ETF] ETF_ENABLED=0 — 스킵 (호스트에 momentum_etf 없는 환경)")
+        return
     import subprocess
     from database import batch_start, batch_finish
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [ETF] 모멘텀 스크리닝 시작")
     bid = batch_start("etf_screen")
     try:
         etf_dir = Path(os.getenv("ETF_SCREENER_DIR", "D:/momentum_etf"))
-        etf_py  = etf_dir / "venv_mom_etf" / "Scripts" / "python.exe"
+        # Linux: venv_mom_etf/bin/python · Windows: venv_mom_etf/Scripts/python.exe
+        py_override = os.getenv("ETF_SCREENER_PYTHON")
+        if py_override:
+            etf_py = Path(py_override)
+        elif (etf_dir / "venv_mom_etf" / "Scripts" / "python.exe").exists():
+            etf_py = etf_dir / "venv_mom_etf" / "Scripts" / "python.exe"
+        else:
+            etf_py = etf_dir / "venv_mom_etf" / "bin" / "python"
         if not etf_py.exists():
             msg = f"venv 파이썬 미발견 ({etf_py})"
             print(f"[ETF] {msg} — 스킵")

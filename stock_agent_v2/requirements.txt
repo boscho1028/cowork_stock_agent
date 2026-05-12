@@ -6,6 +6,10 @@ google-genai>=1.0.0        # Gemini API (analyzer.py _call_gemini)
 requests>=2.31.0           # KIS / DART / SEC EDGAR / Telegram
 pandas>=2.0.0              # 캔들·지표·DB 조회
 numpy>=1.24.0              # 지표 계산·시그널
+yfinance>=0.2.40           # market_warning 시세 (SPY/QQQ/VIX/...)
+beautifulsoup4>=4.12.0     # F&G 페이지 폴백 파싱
+pytz>=2024.1               # KST 처리
+apscheduler>=3.10.0        # Docker scheduler 서비스용 cron-like
 
 # ── 차트 ────────────────────────────────────────────────────────
 matplotlib>=3.7.0          # chart_generator (Pillow는 matplotlib 의존성으로 자동 설치)

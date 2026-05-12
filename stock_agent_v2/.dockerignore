@@ -1,0 +1,31 @@
+venv_kis/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.git/
+.gitignore
+
+# 로컬 데이터 — compose 가 호스트의 ./data 를 마운트하므로 이미지엔 포함하지 않음
+data/
+logs/
+tokens/
+
+# 스크래치/디버그
+bash.exe.stackdump
+*.stackdump
+debug_*.png
+verify_*.png
+preview_*.png
+scheduled_task_report_*.md
+test_kis_*.py
+test_krx_*.py
+prebuild_charts.py
+
+# IDE
+.vscode/
+.idea/
+
+# 환경 파일은 절대 이미지에 굽지 않음 — compose 의 env_file 로 런타임에 주입
+.env
+.env.*

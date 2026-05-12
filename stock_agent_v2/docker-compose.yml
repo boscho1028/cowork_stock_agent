@@ -1,0 +1,70 @@
+# Docker Compose — GX10 (ARM64 Linux) 또는 일반 Linux/macOS 배포용.
+#
+# 사용:
+#   1) .env 를 호스트에 준비 (Windows 의 .env 를 그대로 복사 가능. WEB_ONLY=1
+#      추천. KIS_TOKEN_CACHE_DIR 줄은 삭제하거나 비워두면 컨테이너 내 기본
+#      경로 /app/tokens 사용)
+#   2) docker compose up -d --build
+#   3) docker compose logs -f web        # 또는 scheduler, tg
+#
+# 데이터 경로:
+#   ./data    → /app/data    (stock_agent.db 등; Turso 와 sync 됨)
+#   ./logs    → /app/logs    (배치 실행 로그)
+#   ./tokens  → /app/tokens  (KIS access token 캐시 — JSON 파일)
+#   ./data/charts → 차트 PNG (data 안에 포함되어 자동 마운트)
+#
+# 외부 노출(친구·다른 PC 가 접속):
+#   - ngrok 가 가장 단순. 호스트에서 `ngrok http 8000` 또는 compose 에
+#     ngrok 서비스 추가.
+#   - Cloudflare Tunnel 도 동일 패턴.
+#   - GX10 이 외부 IP 가 있으면 ports: 80:8000 + 리버스 프록시.
+
+services:
+  web:
+    build: .
+    image: stock-agent
+    container_name: stock-agent-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./tokens:/app/tokens
+      - ./portfolio.csv:/app/portfolio.csv
+      - ./universe.csv:/app/universe.csv
+    command: ["python", "run_web.py"]
+
+  scheduler:
+    build: .
+    image: stock-agent
+    container_name: stock-agent-scheduler
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [web]
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./tokens:/app/tokens
+      - ./portfolio.csv:/app/portfolio.csv
+      - ./universe.csv:/app/universe.csv
+    command: ["python", "scheduler.py"]
+
+  tg:
+    build: .
+    image: stock-agent
+    container_name: stock-agent-tg
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [web]
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./tokens:/app/tokens
+      - ./portfolio.csv:/app/portfolio.csv
+      - ./universe.csv:/app/universe.csv
+    command: ["python", "telegram_trigger.py"]
