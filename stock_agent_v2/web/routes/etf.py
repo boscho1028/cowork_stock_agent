@@ -8,8 +8,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from database import get_conn
-from web.banner import build_status_banner
+from database import get_conn, latest_batch_run
+from web.banner import build_status_banner, last_refresh_at
 from web.deps import require_user_or_redirect
 
 router = APIRouter()
@@ -41,13 +41,14 @@ def etf_page(request: Request):
     if isinstance(u, RedirectResponse):
         return u
     banner = build_status_banner("etf_screen", "ETF 모멘텀 스크리닝")
+    refreshed = last_refresh_at("etf_screen")
     with get_conn() as conn:
         asof = _latest_date(conn)
         if not asof:
             return request.app.state.templates.TemplateResponse(
                 request, "etf/index.html",
                 {"asof": None, "unified": [], "kr": [], "us": [],
-                 "banner": banner, "user": u},
+                 "banner": banner, "refreshed": refreshed, "user": u},
             )
         unified = _rows(conn, """
             SELECT theme, category, us_ticker,
@@ -82,5 +83,25 @@ def etf_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request, "etf/index.html",
         {"asof": asof, "unified": unified, "kr": kr, "us": us,
-         "banner": banner, "user": u},
+         "banner": banner, "refreshed": refreshed, "user": u},
     )
+
+
+@router.post("/etf/refresh")
+def etf_refresh(request: Request):
+    """수동 트리거 — momentum_etf 스크리닝을 백그라운드에서 실행.
+    이미 running 중이면 새로 시작 안 함 (중복 방지).
+    즉시 /etf 로 redirect — banner 가 '실행 중' 표시.
+    """
+    u = require_user_or_redirect(request)
+    if isinstance(u, RedirectResponse):
+        return u
+    last = latest_batch_run("etf_screen")
+    if last and last["status"] == "running" and not last["finished_at"]:
+        # 이미 도는 중 — 새로 시작 안 함
+        return RedirectResponse(url="/etf", status_code=303)
+    import threading
+    from main import run_etf_screen
+    threading.Thread(target=run_etf_screen,
+                      daemon=True, name="etf-refresh").start()
+    return RedirectResponse(url="/etf", status_code=303)

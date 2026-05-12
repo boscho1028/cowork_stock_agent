@@ -18,7 +18,7 @@
     </form>
   </div>
 </div>
-<p class="muted">{{ rec.analyzed_at }}</p>
+<p class="muted">{{ rec.analyzed_at }} KST</p>
 
 {% set tf = {} %}
 {% for s in sections %}
@@ -38,7 +38,7 @@
   {% set s = tf.get(iv) %}
   {% set last_d = last_candles and last_candles.get(iv) %}
   <section class="tf-block">
-    <h2>{{ icon }} {{ label }}{% if last_d %} <span class="last-candle">· 마지막 캔들 {{ last_d }}</span>{% endif %}</h2>
+    <h2>{{ icon }} {{ label }}{% if last_d %} <span class="last-candle">· 마지막 캔들 {{ last_d }} (종가)</span>{% endif %}</h2>
 
     {# 1) 기술 차트 (캔들 + MA + 거래량 + RSI) #}
     <div class="charts">

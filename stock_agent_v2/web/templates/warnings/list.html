@@ -12,7 +12,7 @@
     {% for it in items %}
       <article class="warning-card fg-{{ it.fg_band or 'neutral' }} {% if it.is_today %}is-today{% endif %}">
         <header>
-          <span class="when">{{ it.asof }}</span>
+          <span class="when">{{ it.asof }} KST</span>
           {% if it.is_today %}<span class="today-badge">오늘</span>{% endif %}
           {% if it.fg_score is not none %}
             <span class="fg-pill fg-{{ it.fg_band or 'neutral' }}">

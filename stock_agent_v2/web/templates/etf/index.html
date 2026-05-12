@@ -10,8 +10,18 @@
 {%- endmacro %}
 
 {% block content %}
-<h1>📈 ETF 모멘텀</h1>
-<p class="muted">한미 ETF 모멘텀 스크리닝 (Jegadeesh-Titman 가중치 1W·1M·3M = 0.4·0.4·0.2){% if asof %} · {{ asof }} 기준{% endif %}</p>
+<div class="page-head">
+  <h1>📈 ETF 모멘텀</h1>
+  <form action="/etf/refresh" method="post" class="no-print" style="display:inline;"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ 스크리닝 시작 (5~20분)';">
+    <button type="submit" class="refresh-btn"
+            title="momentum_etf 스크리닝을 백그라운드에서 새로 실행 (5~20분 소요)">🔄 새로고침</button>
+  </form>
+</div>
+<p class="muted">한미 ETF 모멘텀 스크리닝 (Jegadeesh-Titman 가중치 1W·1M·3M = 0.4·0.4·0.2)
+  {%- if asof %} · 데이터 {{ asof }}{% endif -%}
+  {%- if refreshed %} · 갱신 {{ refreshed }} KST{% endif -%}
+</p>
 
 {% include "_banner.html" %}
 

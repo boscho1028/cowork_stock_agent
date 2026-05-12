@@ -51,12 +51,12 @@ def build_status_banner(batch_name: str,
             return {
                 "level":  "warn",
                 "title":  f"{label} 30분 이상 응답 없음",
-                "detail": f"시작 {run['started_at']} — 멈춰있을 수 있음",
+                "detail": f"시작 {run['started_at']} KST — 멈춰있을 수 있음",
             }
         return {
             "level":  "running",
             "title":  f"{label} 실행 중",
-            "detail": f"시작 {run['started_at']} · 완료 후 자동 갱신",
+            "detail": f"시작 {run['started_at']} KST · 완료 후 자동 갱신",
         }
 
     # 2) 24시간 이내 실패
@@ -66,7 +66,7 @@ def build_status_banner(batch_name: str,
             return {
                 "level":  "error",
                 "title":  f"마지막 {label} 실패",
-                "detail": f"{run['finished_at']} · {run['message'] or '원인 불명'}",
+                "detail": f"{run['finished_at']} KST · {run['message'] or '원인 불명'}",
             }
 
     # 3) 24시간 이내 partial (KR 만 됐고 US 실패 같은 경우)
@@ -76,9 +76,19 @@ def build_status_banner(batch_name: str,
             return {
                 "level":  "warn",
                 "title":  f"{label} 일부만 성공",
-                "detail": f"{run['finished_at']} · {run['message'] or ''}",
+                "detail": f"{run['finished_at']} KST · {run['message'] or ''}",
             }
 
+    return None
+
+
+def last_refresh_at(batch_name: str) -> str | None:
+    """가장 최근 success/partial 종료 시각 (KST). 없으면 None."""
+    run = latest_batch_run(batch_name)
+    if not run:
+        return None
+    if run["status"] in ("success", "partial") and run["finished_at"]:
+        return run["finished_at"]
     return None
 
 
