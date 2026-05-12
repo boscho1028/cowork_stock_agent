@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 
 import config
 from database import latest_analysis_per_ticker, load_analysis, get_latest_candle_date
+from web.banner import build_multi_banner
 from web.deps import require_user_or_redirect
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -66,9 +67,13 @@ def reports_list(request: Request):
     if isinstance(u, RedirectResponse):
         return u
     grid = _build_grid()
+    banner = build_multi_banner([
+        ("kr_evening",    "한국 저녁 분석"),
+        ("morning_brief", "모닝 브리핑"),
+    ])
     return request.app.state.templates.TemplateResponse(
         request, "reports/list.html",
-        {"grid": grid, "user": u},
+        {"grid": grid, "banner": banner, "user": u},
     )
 
 
@@ -324,10 +329,13 @@ def reports_detail(analysis_id: int, request: Request):
             status_code=404,
         )
     sections, fallback_text = _build_sections(rec)
-    # 인터벌별 마지막 캔들 일자 — 분석 본문의 가격이 어느 시점 기준인지 표시용.
     last_candles = {
         iv: get_latest_candle_date(rec["ticker"], iv) for iv in ("D", "W", "M")
     }
+    banner = build_multi_banner([
+        ("kr_evening",    "한국 저녁 분석"),
+        ("morning_brief", "모닝 브리핑"),
+    ])
     return request.app.state.templates.TemplateResponse(
         request, "reports/detail.html",
         {
@@ -335,6 +343,7 @@ def reports_detail(analysis_id: int, request: Request):
             "sections":      sections,
             "fallback_text": fallback_text,
             "last_candles":  last_candles,
+            "banner":        banner,
             "user":          u,
         },
     )

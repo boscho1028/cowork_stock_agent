@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 
 import config
 from database import load_investor_trend
+from web.banner import build_status_banner
 from web.deps import require_user_or_redirect
 
 router = APIRouter()
@@ -91,9 +92,10 @@ def supply_page(request: Request):
             "foreign": _periods_line(r["periods"], 0),
             "inst":    _periods_line(r["periods"], 1),
         })
+    banner = build_status_banner("kr_evening", "한국 저녁 분석 (수급 포함)")
     return request.app.state.templates.TemplateResponse(
         request, "supply/index.html",
-        {"items": items, "asof": asof, "user": u},
+        {"items": items, "asof": asof, "banner": banner, "user": u},
     )
 
 

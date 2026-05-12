@@ -13,6 +13,8 @@
 <h1>📈 ETF 모멘텀</h1>
 <p class="muted">한미 ETF 모멘텀 스크리닝 (Jegadeesh-Titman 가중치 1W·1M·3M = 0.4·0.4·0.2){% if asof %} · {{ asof }} 기준{% endif %}</p>
 
+{% include "_banner.html" %}
+
 {% if not asof %}
   <p class="empty">스크리닝 데이터 없음 — momentum_etf 배치 실행 후 다시 확인하세요.</p>
 {% else %}

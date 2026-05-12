@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from database import get_conn
+from web.banner import build_status_banner
 from web.deps import require_user_or_redirect
 
 router = APIRouter()
@@ -39,12 +40,14 @@ def etf_page(request: Request):
     u = require_user_or_redirect(request)
     if isinstance(u, RedirectResponse):
         return u
+    banner = build_status_banner("etf_screen", "ETF 모멘텀 스크리닝")
     with get_conn() as conn:
         asof = _latest_date(conn)
         if not asof:
             return request.app.state.templates.TemplateResponse(
                 request, "etf/index.html",
-                {"asof": None, "unified": [], "kr": [], "us": [], "user": u},
+                {"asof": None, "unified": [], "kr": [], "us": [],
+                 "banner": banner, "user": u},
             )
         unified = _rows(conn, """
             SELECT theme, category, us_ticker,
@@ -78,5 +81,6 @@ def etf_page(request: Request):
         """, (asof,))
     return request.app.state.templates.TemplateResponse(
         request, "etf/index.html",
-        {"asof": asof, "unified": unified, "kr": kr, "us": us, "user": u},
+        {"asof": asof, "unified": unified, "kr": kr, "us": us,
+         "banner": banner, "user": u},
     )

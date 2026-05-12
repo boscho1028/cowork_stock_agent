@@ -3,6 +3,7 @@
 {% block content %}
 <h1>시장 경고 브리핑</h1>
 <p class="muted">최근 {{ items|length }}건</p>
+{% include "_banner.html" %}
 
 {% if not items %}
   <p class="empty">아직 브리핑이 없습니다.</p>

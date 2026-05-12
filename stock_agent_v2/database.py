@@ -275,6 +275,18 @@ def init_db():
             payload     TEXT NOT NULL,   -- JSON
             updated_at  TEXT NOT NULL
         );
+
+        -- ── 배치 실행 로그 (UI 에 지연·에러 배너 노출용) ─────────────
+        CREATE TABLE IF NOT EXISTS batch_runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,        -- etf_screen / kr_evening / morning_brief / ...
+            started_at  TEXT NOT NULL,        -- KST
+            finished_at TEXT,                 -- KST (NULL=running)
+            status      TEXT,                 -- running / success / failure / partial
+            message     TEXT                  -- 요약 / 에러 메세지
+        );
+        CREATE INDEX IF NOT EXISTS idx_batch_runs_name
+            ON batch_runs(name, started_at DESC);
         """)
         conn.commit()
         # 스키마 생성분을 클라우드로 push
@@ -609,6 +621,57 @@ def load_ticker_snapshot(ticker: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+# ── 배치 실행 로그 ───────────────────────────────────────────────────
+
+def batch_start(name: str) -> int:
+    """배치 실행 시작 기록 → row id 반환."""
+    with get_conn(sync_after=True) as conn:
+        cur = conn.execute("""
+            INSERT INTO batch_runs (name, started_at, status)
+            VALUES (?, ?, 'running')
+        """, (name, _now_kst()))
+        rid = cur.lastrowid
+        if rid is None:
+            row = conn.execute(
+                "SELECT id FROM batch_runs WHERE name=? ORDER BY id DESC LIMIT 1",
+                (name,),
+            ).fetchone()
+            rid = row[0] if row else 0
+    return int(rid)
+
+
+def batch_finish(run_id: int, status: str, message: str = "") -> None:
+    """배치 종료 — status: success|failure|partial."""
+    if status not in ("success", "failure", "partial"):
+        status = "failure"
+    with get_conn(sync_after=True) as conn:
+        conn.execute("""
+            UPDATE batch_runs
+            SET finished_at=?, status=?, message=?
+            WHERE id=?
+        """, (_now_kst(), status, (message or "")[:1000], run_id))
+
+
+def latest_batch_run(name: str) -> dict | None:
+    """가장 최근 run row → {id, name, started_at, finished_at, status, message}."""
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT id, name, started_at, finished_at, status, message
+            FROM batch_runs
+            WHERE name=?
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+        """, (name,))
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "name": row[1],
+        "started_at": row[2], "finished_at": row[3],
+        "status": row[4], "message": row[5],
+    }
 
 
 # ── 분석 로그 ────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@
   <p class="empty">해당 분석을 찾을 수 없습니다.</p>
   <p><a href="/reports">← 목록으로</a></p>
 {% else %}
+{% include "_banner.html" %}
 <a class="back" href="/reports">← 목록</a>
 <div class="detail-head">
   <h1>{{ rec.ticker }}</h1>

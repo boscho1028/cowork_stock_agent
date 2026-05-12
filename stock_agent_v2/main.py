@@ -578,7 +578,9 @@ def run_morning_brief():
     미국 포트폴리오가 비어 있으면 해당 섹션은 조용히 스킵.
     US·KR 둘 다 비면 전송도 스킵.
     """
+    from database import batch_start, batch_finish
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [BRIEF] 모닝 브리핑 시작")
+    bid = batch_start("morning_brief")
     try:
         us_tickers, kr_tickers = _split_portfolio()
         sections: list[list[str]] = []
@@ -704,7 +706,9 @@ def run_morning_brief():
                     print(f"[NL] 텔레그램 첨부 실패: {e}")
         except Exception as e:
             print(f"[NL] morning batch 실행 실패 (모닝 브리핑은 완료): {e}")
+        batch_finish(bid, "success", "morning brief + NL signals 완료")
     except Exception as e:
+        batch_finish(bid, "failure", f"{type(e).__name__}: {e}")
         _notify_batch_error("모닝 브리핑", e)
 
 
@@ -815,12 +819,16 @@ def run_etf_screen():
     경로/타임아웃은 ETF_SCREENER_DIR / ETF_SCREEN_TIMEOUT_SEC 로 오버라이드.
     """
     import subprocess
+    from database import batch_start, batch_finish
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [ETF] 모멘텀 스크리닝 시작")
+    bid = batch_start("etf_screen")
     try:
         etf_dir = Path(os.getenv("ETF_SCREENER_DIR", "D:/momentum_etf"))
         etf_py  = etf_dir / "venv_mom_etf" / "Scripts" / "python.exe"
         if not etf_py.exists():
-            print(f"[ETF] python.exe 미발견 ({etf_py}) — 스킵")
+            msg = f"venv 파이썬 미발견 ({etf_py})"
+            print(f"[ETF] {msg} — 스킵")
+            batch_finish(bid, "failure", msg)
             return
         timeout_s = int(os.getenv("ETF_SCREEN_TIMEOUT_SEC", "1800"))
         result = subprocess.run(
@@ -831,15 +839,25 @@ def run_etf_screen():
             timeout=timeout_s,
         )
         if result.returncode == 0:
-            tail = (result.stdout or "").strip().splitlines()[-3:]
-            print("[ETF] 완료\n  " + "\n  ".join(tail))
+            tail_lines = (result.stdout or "").strip().splitlines()[-3:]
+            tail = "\n  ".join(tail_lines)
+            print(f"[ETF] 완료\n  {tail}")
+            batch_finish(bid, "success", "\n".join(tail_lines)[:500])
         else:
             err = (result.stderr or result.stdout or "").strip()
             print(f"[ETF] 실패 (exit {result.returncode}):\n{err[-1000:]}")
+            batch_finish(bid, "failure",
+                         f"exit {result.returncode}: {err[-300:]}")
             _notify_batch_error("ETF 모멘텀 스크리닝",
                                  RuntimeError(f"exit {result.returncode}: {err[-300:]}"))
+    except subprocess.TimeoutExpired:
+        msg = f"timeout {timeout_s}s 초과"
+        print(f"[ETF] {msg}")
+        batch_finish(bid, "failure", msg)
+        _notify_batch_error("ETF 모멘텀 스크리닝", RuntimeError(msg))
     except Exception as e:
         print(f"[ETF] 예외: {e}")
+        batch_finish(bid, "failure", f"{type(e).__name__}: {e}")
         _notify_batch_error("ETF 모멘텀 스크리닝", e)
 
 
@@ -864,11 +882,14 @@ def run_kr_evening():
     universe 전체 외국인·기관 수급 수집 + portfolio AI 분석 + 차트 전송.
     국내 포트폴리오가 비면 조용히 스킵.
     """
+    from database import batch_start, batch_finish
     print(f"\n[{datetime.now():%Y-%m-%d %H:%M}] [REPORT] 한국 저녁 분석 시작")
+    bid = batch_start("kr_evening")
     try:
         _, kr_tickers = _split_portfolio()
         if not kr_tickers:
             print("[REPORT] 국내 포트폴리오 없음 — 스킵")
+            batch_finish(bid, "success", "KR 포트폴리오 없음 — 스킵")
             return
         cmd_update(kr_tickers)
 
@@ -891,10 +912,14 @@ def run_kr_evening():
             header = f"{header}\n\n{supply}"
 
         cmd_analyze(tickers=kr_tickers, header=header, header_photo=supply_chart)
+        batch_finish(bid, "success",
+                      f"KR 분석 {len(kr_tickers)}종목 + 수급 + 공시 완료")
     except Exception as e:
+        batch_finish(bid, "failure", f"{type(e).__name__}: {e}")
         _notify_batch_error("한국 저녁 분석", e)
 
     # ETF 모멘텀 스크리닝 — 저녁 잡 끝나면 이어서 (실패해도 evening 결과는 이미 발송됨).
+    # ETF 자체 batch_runs 기록은 run_etf_screen 안에서 따로 처리.
     try:
         run_etf_screen()
     except Exception as e:

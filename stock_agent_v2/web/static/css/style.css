@@ -253,6 +253,23 @@ pre.report-body, pre.warning-body {
 .supply-row .role.foreign { color: #42a5f5; }
 .supply-row .role.inst    { color: #ffa726; }
 
+/* 상태 배너 (지연·에러·실행 중 표시) */
+.status-banner {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 14px; margin: 12px 0 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+.status-banner .banner-icon { font-size: 18px; line-height: 1.2; }
+.status-banner .banner-body { flex: 1; }
+.status-banner strong { font-size: 14px; }
+.status-banner .banner-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.status-banner.level-error   { background: rgba(239,83,80,0.08); border-color: rgba(239,83,80,0.4); }
+.status-banner.level-warn    { background: rgba(255,167,38,0.08); border-color: rgba(255,167,38,0.4); }
+.status-banner.level-running  { background: rgba(66,165,245,0.08); border-color: rgba(66,165,245,0.4); }
+.status-banner.level-info    { background: rgba(102,187,106,0.06); border-color: rgba(102,187,106,0.3); }
+
 /* ETF 모멘텀 페이지 */
 .etf-block { margin: 18px 0 24px; }
 .etf-block h2 {

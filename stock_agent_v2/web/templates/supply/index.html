@@ -3,6 +3,7 @@
 {% block content %}
 <h1>🌏 수급 동향</h1>
 <p class="muted">외국인·기관 누적 순매수 (1D / 3D / 1W / 1M){% if asof %} · {{ asof }} 기준{% endif %}</p>
+{% include "_banner.html" %}
 
 {% if not items %}
   <p class="empty">수급 데이터 없음 — 오후 배치 실행 후 다시 확인하세요.</p>

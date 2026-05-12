@@ -1,0 +1,15 @@
+{# 공통 상태 배너 — 라우트에서 `banner` 변수에 dict 전달 시 표시 #}
+{% if banner %}
+<div class="status-banner level-{{ banner.level }}">
+  <span class="banner-icon">
+    {%- if banner.level == 'error' -%}🔴
+    {%- elif banner.level == 'warn' -%}🟡
+    {%- elif banner.level == 'running' -%}⏳
+    {%- else -%}ℹ️{%- endif -%}
+  </span>
+  <div class="banner-body">
+    <strong>{{ banner.title }}</strong>
+    {% if banner.detail %}<div class="banner-detail">{{ banner.detail }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}

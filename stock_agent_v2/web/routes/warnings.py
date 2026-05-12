@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from database import load_market_warnings
+from web.banner import build_status_banner
 from web.deps import require_user_or_redirect
 
 router = APIRouter()
@@ -46,7 +47,8 @@ def warnings_list(request: Request):
             "fg_band":  _fg_band(it.get("fg_score")),
             "is_today": asof.startswith(today),
         })
+    banner = build_status_banner("market_warning", "시장 경고 브리핑")
     return request.app.state.templates.TemplateResponse(
         request, "warnings/list.html",
-        {"items": items, "user": u},
+        {"items": items, "banner": banner, "user": u},
     )
