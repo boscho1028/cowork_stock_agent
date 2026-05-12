@@ -25,10 +25,14 @@
       {{ nav_link('/warnings', '경고') }}
       {{ nav_link('/filings',  '공시') }}
     </nav>
-    <form action="/logout" method="post" class="logout">
-      <span class="who">{{ (user.display_name if user else request.state.username) or "" }}</span>
-      <button type="submit">로그아웃</button>
-    </form>
+    <div class="topbar-actions">
+      <button type="button" class="topbar-print no-print" onclick="window.print();"
+              title="현재 페이지를 인쇄 / PDF 저장">🖨️</button>
+      <form action="/logout" method="post" class="logout">
+        <span class="who">{{ (user.display_name if user else request.state.username) or "" }}</span>
+        <button type="submit">로그아웃</button>
+      </form>
+    </div>
   </header>
 
   <main class="container">

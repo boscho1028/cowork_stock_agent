@@ -6,13 +6,17 @@
   <p><a href="/reports">← 목록으로</a></p>
 {% else %}
 {% include "_banner.html" %}
-<a class="back" href="/reports">← 목록</a>
+<a class="back no-print" href="/reports">← 목록</a>
 <div class="detail-head">
   <h1>{{ rec.ticker }}</h1>
-  <form action="/reports/{{ rec.id }}/refresh" method="post" class="refresh-form"
-        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ 재분석 중...';">
-    <button type="submit" title="KIS 캔들 update + AI 재분석 + 차트 재생성 (30~60초)">🔄 지금 갱신</button>
-  </form>
+  <div class="detail-actions">
+    <button type="button" class="print-btn no-print" onclick="window.print();"
+            title="이 페이지를 인쇄/PDF로 저장">🖨️ 인쇄</button>
+    <form action="/reports/{{ rec.id }}/refresh" method="post" class="refresh-form no-print"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ 재분석 중...';">
+      <button type="submit" title="KIS 캔들 update + AI 재분석 + 차트 재생성 (30~60초)">🔄 지금 갱신</button>
+    </form>
+  </div>
 </div>
 <p class="muted">{{ rec.analyzed_at }}</p>
 

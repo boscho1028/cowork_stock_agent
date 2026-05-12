@@ -59,6 +59,15 @@ a:hover { text-decoration: underline; }
 }
 .logout button:hover { color: var(--text); border-color: var(--muted); }
 
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar-print {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 9px; font-size: 14px; cursor: pointer;
+  line-height: 1; font: inherit;
+}
+.topbar-print:hover { color: var(--text); border-color: var(--muted); background: rgba(255,255,255,0.05); }
+
 /* ── 본문 컨테이너 ────────────────────────────────────── */
 .container { max-width: 880px; margin: 0 auto; padding: 16px; }
 .container h1 { font-size: 22px; margin: 4px 0 8px; }
@@ -391,9 +400,60 @@ pre.report-body, pre.warning-body {
   padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
   background: rgba(255,255,255,0.05); color: var(--text);
   cursor: pointer; font-size: 13px; font: inherit;
+  text-decoration: none; display: inline-block;
 }
 .refresh-btn:hover { background: rgba(255,255,255,0.1); }
 .refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* 분석 상세 페이지 — 액션 버튼들 (인쇄/갱신) */
+.detail-actions {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.detail-actions .print-btn,
+.detail-actions .refresh-form button {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(255,255,255,0.05); color: var(--text);
+  cursor: pointer; font-size: 13px; font: inherit;
+}
+.detail-actions .print-btn:hover,
+.detail-actions .refresh-form button:hover { background: rgba(255,255,255,0.1); }
+.detail-actions .refresh-form button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── 인쇄 전용 (브라우저 print / PDF 저장 시) ────────────────────── */
+@media print {
+  /* 어두운 배경 제거 + 검정 글자로 가독성 확보 */
+  body { background: #fff !important; color: #000 !important; }
+  body, .container { max-width: 100%; padding: 0; margin: 0; }
+
+  /* 화면용 요소 숨김 */
+  .topbar, .navlinks, .logout, .no-print,
+  .detail-actions, .refresh-form, .print-btn,
+  .status-banner, .filter-bar { display: none !important; }
+
+  a { color: #000 !important; text-decoration: none; }
+  a.back { display: none !important; }
+
+  /* 카드/박스 — 인쇄 시 테두리만 흐리게, 배경 흰색 */
+  .tf-block, .status-card, .supply-card, .screener-card {
+    background: #fff !important; border: 1px solid #ccc !important;
+    color: #000 !important;
+    page-break-inside: avoid;            /* 카드 중간에 페이지 안 잘리게 */
+  }
+  h1, h2, h3, h4 { color: #000 !important; page-break-after: avoid; }
+  .muted, .last-candle { color: #555 !important; }
+
+  /* 차트 이미지 — 페이지 폭에 맞추고 한 차트당 한 페이지 우선 */
+  .charts img { max-width: 100% !important; max-height: none !important;
+                 background: #fff !important; }
+  .tf-block { page-break-before: auto; }
+  .tf-block + .tf-block { page-break-before: always; }  /* 인터벌마다 새 페이지 */
+
+  pre.report-body {
+    background: #f7f7f7 !important; color: #000 !important;
+    border: 1px solid #ddd !important;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+}
 
 /* 한국 시장 페이지 (stockeasy) */
 .market-section { margin: 18px 0 22px; }

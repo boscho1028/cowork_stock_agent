@@ -4,6 +4,14 @@
 <h1>공시 (DART · SEC)</h1>
 <p class="muted">최근 14일 · 국내 {{ grid.kr|length }}건 · 해외 {{ grid.us|length }}건</p>
 
+<div class="filter-bar">
+  <div class="tabs">
+    <button class="tab active" data-market="all">전체 <span class="cnt">{{ grid.kr|length + grid.us|length }}</span></button>
+    <button class="tab" data-market="kr">🇰🇷 국내 <span class="cnt">{{ grid.kr|length }}</span></button>
+    <button class="tab" data-market="us">🇺🇸 해외 <span class="cnt">{{ grid.us|length }}</span></button>
+  </div>
+</div>
+
 {% macro render_card(it) %}
   {% set has_url = it.url %}
   <article class="filing-card src-{{ it.source }} {% if it.icon %}prio-{{ it.icon }}{% endif %} {% if it.is_today %}is-today{% endif %}">
@@ -51,4 +59,20 @@
     </div>
   {% endif %}
 </section>
+
+<script>
+// 시장 탭 전환 — 클릭한 탭의 data-market 만 보이게 (all = 모두).
+(function () {
+  const tabs = document.querySelectorAll('.filter-bar .tab[data-market]');
+  const blocks = document.querySelectorAll('.market-block[data-market]');
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    const m = t.dataset.market;
+    blocks.forEach(b => {
+      b.style.display = (m === 'all' || b.dataset.market === m) ? '' : 'none';
+    });
+  }));
+})();
+</script>
 {% endblock %}
