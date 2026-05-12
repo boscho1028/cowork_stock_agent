@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}스크리너 — Vanguard{% endblock %}
+{% block content %}
+<h1>🔍 자연어 스크리너</h1>
+<p class="muted">자연어로 정의된 조건을 LLM 으로 평가해 portfolio·universe 중 매치되는 종목을 찾습니다. 저장된 시그널은 매일 07:30 morning brief 때 자동 실행됩니다.</p>
+
+<section class="screener-block">
+  <h2>+ 새 시그널</h2>
+  <form action="/screener/new" method="post" class="screener-form"
+        onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='실행 중...';">
+    <label>
+      이름
+      <input type="text" name="name" required maxlength="80"
+             placeholder="예: MA5 풀백 후보" />
+    </label>
+    <label>
+      자연어 정의
+      <textarea name="prompt" required rows="4"
+                placeholder="예: 5일선이 20일선 위에 있고, 현재가가 5일선에서 -3% 이내, 거래량이 20일 평균의 1.5배 이상, RSI 50~70 사이"></textarea>
+    </label>
+    <div class="row">
+      <label class="inline">
+        범위
+        <select name="scope">
+          <option value="portfolio">portfolio (18종목, 빠름)</option>
+          <option value="universe">universe (76종목, 느림)</option>
+        </select>
+      </label>
+      <label class="inline checkbox">
+        <input type="checkbox" name="enabled" checked />
+        매일 07:30 자동 실행
+      </label>
+    </div>
+    <div class="row buttons">
+      <button type="submit" name="run_now" value="">저장만</button>
+      <button type="submit" name="run_now" value="1" class="primary">저장 + 지금 실행</button>
+    </div>
+  </form>
+
+  <details class="screener-adhoc">
+    <summary>저장 없이 즉시 실행 (테스트)</summary>
+    <form action="/screener/adhoc" method="post" class="screener-form"
+          onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='실행 중...';">
+      <label>
+        자연어 정의
+        <textarea name="prompt" required rows="3"
+                  placeholder="조건을 자연어로 입력"></textarea>
+      </label>
+      <div class="row">
+        <label class="inline">
+          범위
+          <select name="scope">
+            <option value="portfolio">portfolio</option>
+            <option value="universe">universe</option>
+          </select>
+        </label>
+        <button type="submit" class="primary">즉시 실행</button>
+      </div>
+    </form>
+  </details>
+</section>
+
+<section class="screener-block">
+  <h2>저장된 시그널 ({{ signals|length }})</h2>
+  {% if not signals %}
+    <p class="empty">아직 없습니다. 위 폼으로 추가해보세요.</p>
+  {% else %}
+  <div class="screener-list">
+    {% for s in signals %}
+    <article class="screener-card{{ ' off' if not s.enabled else '' }}">
+      <header>
+        <h3>{{ s.name }}</h3>
+        <span class="meta">
+          <span class="badge scope">{{ s.scope }}</span>
+          <span class="badge {{ 'on' if s.enabled else 'off' }}">
+            {{ '자동 실행' if s.enabled else '비활성' }}
+          </span>
+          {% if s.last_run_at %}<span class="muted">최근 {{ s.last_run_at }}{% if s.last_match_count is not none %} · 매치 {{ s.last_match_count }}{% endif %}</span>{% endif %}
+        </span>
+      </header>
+      <pre class="prompt-body">{{ s.prompt }}</pre>
+      <div class="screener-actions">
+        <form action="/screener/{{ s.id }}/run" method="post" style="display:inline;"
+              onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='실행 중...';">
+          <button type="submit" class="primary">지금 실행</button>
+        </form>
+        <form action="/screener/{{ s.id }}/toggle" method="post" style="display:inline;">
+          <button type="submit">{{ '비활성화' if s.enabled else '활성화' }}</button>
+        </form>
+        <form action="/screener/{{ s.id }}/delete" method="post" style="display:inline;"
+              onsubmit="return confirm('정말 삭제하시겠습니까?');">
+          <button type="submit" class="danger">삭제</button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+{% endblock %}

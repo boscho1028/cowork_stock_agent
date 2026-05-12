@@ -253,6 +253,28 @@ def init_db():
             PRIMARY KEY (analysis_id, interval),
             FOREIGN KEY (analysis_id) REFERENCES analysis_log(id) ON DELETE CASCADE
         );
+
+        -- ── 자연어 시그널 정의 (사용자가 자연어로 등록, batch/즉시 실행) ──
+        CREATE TABLE IF NOT EXISTS nl_signals (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT NOT NULL,
+            prompt           TEXT NOT NULL,
+            scope            TEXT NOT NULL DEFAULT 'portfolio',  -- portfolio|universe
+            enabled          INTEGER NOT NULL DEFAULT 1,         -- morning batch 포함 여부
+            created_at       TEXT NOT NULL,
+            last_run_at      TEXT,
+            last_match_count INTEGER
+        );
+
+        -- ── 종목 스냅샷 (NL 스크리너 캐시) ───────────────────────────
+        -- 일봉 60봉 → 지표 + 최근 5봉을 JSON 으로 캐싱.
+        -- 캔들 update 후 첫 접근 시 갱신 (last_date != 최신 일봉 날짜일 때).
+        CREATE TABLE IF NOT EXISTS ticker_snapshot (
+            ticker      TEXT PRIMARY KEY,
+            last_date   TEXT NOT NULL,   -- 최근 일봉 날짜
+            payload     TEXT NOT NULL,   -- JSON
+            updated_at  TEXT NOT NULL
+        );
         """)
         conn.commit()
         # 스키마 생성분을 클라우드로 push
@@ -484,6 +506,109 @@ def load_investor_trend(ticker: str, days: int = 30) -> list:
         """, (ticker, int(days)))
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+# ── 자연어 시그널 (NL signals) ──────────────────────────────────────
+
+def create_nl_signal(name: str, prompt: str, scope: str = "portfolio",
+                     enabled: bool = True) -> int:
+    """자연어 시그널 저장. 새 id 반환."""
+    scope = scope if scope in ("portfolio", "universe") else "portfolio"
+    with get_conn(sync_after=True) as conn:
+        cur = conn.execute("""
+            INSERT INTO nl_signals (name, prompt, scope, enabled, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (name, prompt, scope, 1 if enabled else 0, _now_kst()))
+        rid = cur.lastrowid
+        if rid is None:
+            row = conn.execute(
+                "SELECT id FROM nl_signals WHERE name=? ORDER BY id DESC LIMIT 1",
+                (name,),
+            ).fetchone()
+            rid = row[0] if row else 0
+    return int(rid)
+
+
+def list_nl_signals() -> list[dict]:
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT id, name, prompt, scope, enabled, created_at,
+                   last_run_at, last_match_count
+            FROM nl_signals
+            ORDER BY id DESC
+        """)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def get_nl_signal(signal_id: int) -> dict | None:
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT id, name, prompt, scope, enabled, created_at,
+                   last_run_at, last_match_count
+            FROM nl_signals WHERE id=?
+        """, (signal_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+
+
+def update_nl_signal_run(signal_id: int, match_count: int) -> None:
+    with get_conn(sync_after=True) as conn:
+        conn.execute("""
+            UPDATE nl_signals SET last_run_at=?, last_match_count=? WHERE id=?
+        """, (_now_kst(), int(match_count), signal_id))
+
+
+def set_nl_signal_enabled(signal_id: int, enabled: bool) -> None:
+    with get_conn(sync_after=True) as conn:
+        conn.execute("UPDATE nl_signals SET enabled=? WHERE id=?",
+                     (1 if enabled else 0, signal_id))
+
+
+def delete_nl_signal(signal_id: int) -> None:
+    with get_conn(sync_after=True) as conn:
+        conn.execute("DELETE FROM nl_signals WHERE id=?", (signal_id,))
+
+
+# ── 종목 스냅샷 (NL 스크리너 인디케이터 캐시) ─────────────────────────
+
+def save_ticker_snapshot(ticker: str, last_date: str, payload: dict) -> None:
+    """ticker_snapshot upsert. payload 는 dict — JSON 직렬화."""
+    import json
+    with get_conn(sync_after=True) as conn:
+        conn.execute("""
+            INSERT INTO ticker_snapshot (ticker, last_date, payload, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                last_date  = excluded.last_date,
+                payload    = excluded.payload,
+                updated_at = excluded.updated_at
+        """, (ticker, last_date,
+              json.dumps(payload, ensure_ascii=False),
+              _now_kst()))
+
+
+def load_ticker_snapshot(ticker: str) -> dict | None:
+    """반환: {last_date, payload(dict), updated_at} or None."""
+    import json
+    with get_conn() as conn:
+        row = conn.execute("""
+            SELECT last_date, payload, updated_at
+            FROM ticker_snapshot WHERE ticker=?
+        """, (ticker,)).fetchone()
+    if not row:
+        return None
+    try:
+        return {
+            "last_date":  row[0],
+            "payload":    json.loads(row[1]),
+            "updated_at": row[2],
+        }
+    except Exception:
+        return None
 
 
 # ── 분석 로그 ────────────────────────────────────────────────────────

@@ -26,8 +26,43 @@ STATIC_DIR = WEB_DIR / "static"
 CHARTS_DIR = PROJECT_ROOT / "data" / "charts"
 
 
+def _start_turso_sync_thread(interval_sec: int = 300):
+    """주기적으로 embedded replica 를 Turso 클라우드와 sync.
+    웹 서버는 읽기 전용이라 get_conn() 이 자동 sync 안 함 →
+    다른 PC/배치(예: momentum_etf, 다른 분석 잡) 가 Turso 에 쓴 새 데이터가
+    이 PC 의 웹에 보이려면 누군가 conn.sync() 를 호출해야 한다.
+    백그라운드 데몬으로 5분(기본)마다 호출.
+    """
+    import os, threading, time as _t
+    from database import _new_conn, _try_sync, _TURSO_ENABLED
+    if not _TURSO_ENABLED:
+        print("[WEB] Turso 미설정 — 백그라운드 sync 비활성")
+        return
+    interval_sec = int(os.getenv("WEB_TURSO_SYNC_INTERVAL_SEC", str(interval_sec)))
+
+    def _loop():
+        # 시작 후 첫 sync 는 짧게 (서버 부팅 직후 최신 데이터 빨리 끌어오기)
+        first_delay = min(15, interval_sec)
+        _t.sleep(first_delay)
+        while True:
+            try:
+                conn = _new_conn()
+                _try_sync(conn)
+                conn.close()
+            except Exception as e:
+                print(f"[WEB] Turso sync 실패: {e}")
+            _t.sleep(interval_sec)
+
+    th = threading.Thread(target=_loop, daemon=True, name="turso-sync")
+    th.start()
+    print(f"[WEB] Turso 백그라운드 sync 시작 ({interval_sec}s 주기)")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Vanguard (private share)")
+
+    # Turso 자동 sync — momentum_etf·다른 PC 쓴 데이터가 웹에 자동 반영되게.
+    _start_turso_sync_thread()
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -289,7 +324,7 @@ def create_app() -> FastAPI:
         )
 
     # ── 컨텐츠 라우트 ────────────────────────────────────────────
-    from web.routes import reports, signals, warnings, filings, universe, supply, etf
+    from web.routes import reports, signals, warnings, filings, universe, supply, etf, screener
     app.include_router(reports.router)
     app.include_router(signals.router)
     app.include_router(warnings.router)
@@ -297,6 +332,7 @@ def create_app() -> FastAPI:
     app.include_router(universe.router)
     app.include_router(supply.router)
     app.include_router(etf.router)
+    app.include_router(screener.router)
 
     @app.get("/")
     def root(request: Request):

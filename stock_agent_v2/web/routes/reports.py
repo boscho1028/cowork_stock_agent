@@ -182,10 +182,74 @@ def _build_sections(rec: dict) -> tuple[list[dict], str | None]:
     return sections, None
 
 
+def _refresh_make_charts(ticker: str, name: str) -> dict:
+    """일/주/월 기술 + 일목 + 엘리엇 차트 (PNG bytes dict).
+    main.py 의 _make_chart 와 동일한 로직이지만 main 임포트 시 stdout 가
+    파일 로그로 tee 되는 사이드이펙트를 피하려고 인라인."""
+    from database import load_candles
+    from chart_generator import generate_chart, generate_elliott_chart
+    from elliott_wave import compute_elliott_wave
+    charts: dict = {}
+    df_by_iv: dict = {}
+    ichi_key = {"D": "D_I", "W": "W_I", "M": "M_I"}
+    for interval, limit in [("D", 400), ("W", 260), ("M", 60)]:
+        try:
+            df = load_candles(ticker, interval, limit=limit)
+            if df.empty:
+                continue
+            charts[interval] = generate_chart(
+                df, ticker, name, config.INDICATOR_CONFIG,
+                interval=interval, mode="tech",
+            )
+            charts[ichi_key[interval]] = generate_chart(
+                df, ticker, name, config.INDICATOR_CONFIG,
+                interval=interval, mode="ichi",
+            )
+            df_by_iv[interval] = df
+        except Exception as e:
+            print(f"[refresh] {ticker} {interval} 차트 실패: {e}")
+    elliott_key = {"D": "E", "W": "E_W", "M": "E_M"}
+    for interval, df in df_by_iv.items():
+        try:
+            ec = config.get_elliott_config(interval)
+            elliott = compute_elliott_wave(df, ec)
+            if not elliott.get("available"):
+                continue
+            img = generate_elliott_chart(df, ticker, name, elliott, interval=interval)
+            if img:
+                charts[elliott_key[interval]] = img
+        except Exception as e:
+            print(f"[refresh] {ticker} 엘리엇 {interval} 실패: {e}")
+    return charts
+
+
+def _refresh_persist_charts(analysis_id: int, ticker: str, charts: dict) -> None:
+    """data/charts/YYYYMMDD/ 에 PNG 저장 + chart_files DB 업데이트."""
+    from database import save_chart_files
+    if not charts:
+        return
+    today = date.today().strftime("%Y%m%d")
+    out_dir = PROJECT_ROOT / "data" / "charts" / today
+    out_dir.mkdir(parents=True, exist_ok=True)
+    saved: dict[str, str] = {}
+    for interval, blob in charts.items():
+        if not blob:
+            continue
+        fpath = out_dir / f"{ticker}_{interval}.png"
+        try:
+            fpath.write_bytes(blob)
+            saved[interval] = str(fpath.relative_to(PROJECT_ROOT)).replace("\\", "/")
+        except Exception as e:
+            print(f"[refresh] {ticker} {interval} 디스크 저장 실패: {e}")
+    if saved:
+        save_chart_files(analysis_id, saved)
+
+
 @router.post("/reports/{analysis_id}/refresh")
 def reports_refresh(analysis_id: int, request: Request):
-    """수동 갱신 — KIS 에서 해당 종목의 최신 캔들을 받아서 차트 캐시 무효화.
-    완료 후 detail 페이지로 redirect."""
+    """수동 갱신 — KIS 캔들 update + AI 재분석 + 차트 재생성 + 캐시 무효화.
+    완료 후 NEW analysis_id 의 detail 페이지로 redirect (실패 시 기존 id).
+    텔레그램은 보내지 않음 (웹 수동 액션이라 별도 알림 불필요)."""
     u = require_user_or_redirect(request)
     if isinstance(u, RedirectResponse):
         return u
@@ -193,8 +257,12 @@ def reports_refresh(analysis_id: int, request: Request):
     if not rec:
         return RedirectResponse(url="/reports", status_code=303)
     ticker = rec["ticker"]
+    info = (config.get_portfolio_detail().get(ticker)
+         or config.get_universe_detail().get(ticker)
+         or {})
+    name = info.get("name", ticker)
 
-    # 1) KIS 캔들 update
+    # 1) KIS 캔들 update — 최신 D/W/M 캔들을 DB 에 받아오기
     try:
         from kis_collector import KISCollector
         kis = KISCollector()
@@ -205,7 +273,22 @@ def reports_refresh(analysis_id: int, request: Request):
     except Exception as e:
         print(f"[refresh] {ticker} KIS update 실패: {e}")
 
-    # 2) 디스크 캐시 무효화 — 오늘 폴더의 해당 종목 PNG 삭제 (캔들 + 엘리엇)
+    # 2) AI 재분석 (Claude/Gemini ~30-60초) + 차트 재생성
+    new_id = analysis_id
+    try:
+        from analyzer import StockAnalyzer
+        from database import save_analysis
+        text = StockAnalyzer().analyze(ticker)
+        new_id = save_analysis(ticker, text)
+        charts = _refresh_make_charts(ticker, name)
+        _refresh_persist_charts(new_id, ticker, charts)
+        print(f"[refresh] {ticker} 재분석 완료 → new id={new_id}, 차트 {len(charts)}장")
+    except Exception as e:
+        import traceback
+        print(f"[refresh] {ticker} AI 재분석 실패 (KIS update 는 완료): {e}")
+        traceback.print_exc()
+
+    # 3) 디스크 차트 캐시 무효화 — 오늘 _live 폴더의 해당 종목 PNG 삭제
     today = date.today().strftime("%Y%m%d")
     today_dir = LIVE_CHART_DIR / today
     removed = 0
@@ -216,16 +299,16 @@ def reports_refresh(analysis_id: int, request: Request):
                 removed += 1
             except Exception:
                 pass
-    print(f"[refresh] {ticker}: 캐시 {removed}장 삭제")
+    print(f"[refresh] {ticker}: _live 캐시 {removed}장 삭제")
 
-    # 3) 메모리 캐시도 무효화 — 새 요청에서 디스크/생성 단계로 가도록
+    # 4) 메모리 캐시도 무효화
     try:
         from web.app import _wipe_chart_cache_for
         _wipe_chart_cache_for(ticker)
     except Exception:
         pass
 
-    return RedirectResponse(url=f"/reports/{analysis_id}", status_code=303)
+    return RedirectResponse(url=f"/reports/{new_id}", status_code=303)
 
 
 @router.get("/reports/{analysis_id}")

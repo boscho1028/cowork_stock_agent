@@ -8,8 +8,9 @@
 <a class="back" href="/reports">← 목록</a>
 <div class="detail-head">
   <h1>{{ rec.ticker }}</h1>
-  <form action="/reports/{{ rec.id }}/refresh" method="post" class="refresh-form">
-    <button type="submit" title="KIS 현재가로 캔들 update + 차트 재생성">🔄 지금 갱신</button>
+  <form action="/reports/{{ rec.id }}/refresh" method="post" class="refresh-form"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ 재분석 중...';">
+    <button type="submit" title="KIS 캔들 update + AI 재분석 + 차트 재생성 (30~60초)">🔄 지금 갱신</button>
   </form>
 </div>
 <p class="muted">{{ rec.analyzed_at }}</p>

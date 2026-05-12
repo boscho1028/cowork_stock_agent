@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}스크리너 결과 — Vanguard{% endblock %}
+{% block content %}
+<a class="back" href="/screener">← 스크리너</a>
+<h1>🔍 {{ signal.name }}</h1>
+<p class="muted">
+  scope = {{ signal.scope }} · 총 {{ total }}종목 · <strong>매치 {{ matched_count }}건</strong>
+</p>
+<pre class="prompt-body">{{ signal.prompt }}</pre>
+
+{% set matched   = results | selectattr('match') | list %}
+{% set unmatched = results | rejectattr('match') | list %}
+
+{% if matched %}
+<section class="screener-block">
+  <h2>✅ 매치 ({{ matched|length }})</h2>
+  <div class="screener-list">
+    {% for r in matched %}
+    <article class="screener-card match">
+      <header>
+        <h3>{{ r.ticker }} <span class="muted">{{ r.name }}</span></h3>
+      </header>
+      <p class="reason">{{ r.reason }}</p>
+      <p><a href="/reports">→ 분석 페이지에서 상세 보기</a></p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if unmatched %}
+<details class="screener-block">
+  <summary>❌ 매치 안 됨 ({{ unmatched|length }})</summary>
+  <div class="screener-list compact">
+    {% for r in unmatched %}
+    <article class="screener-card">
+      <header>
+        <h3>{{ r.ticker }} <span class="muted">{{ r.name }}</span></h3>
+      </header>
+      <p class="reason muted">{{ r.reason }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{% endblock %}

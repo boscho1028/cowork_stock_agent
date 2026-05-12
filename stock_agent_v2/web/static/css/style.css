@@ -282,6 +282,67 @@ pre.report-body, pre.warning-body {
 .etf-table td.neg { color: #42a5f5; }
 .etf-table td.kr-name, .etf-table th.kr-name { white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 
+/* 스크리너 페이지 */
+.screener-block { margin: 18px 0; }
+.screener-block h2 { margin: 0 0 10px; font-size: 16px; border: none; padding: 0; }
+.screener-form { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 14px; }
+.screener-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.screener-form label.inline { flex-direction: row; align-items: center; gap: 6px; }
+.screener-form label.checkbox { align-items: center; }
+.screener-form input[type=text], .screener-form textarea, .screener-form select {
+  padding: 6px 8px; background: rgba(0,0,0,0.25);
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font: inherit;
+}
+.screener-form textarea { resize: vertical; min-height: 60px; }
+.screener-form .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.screener-form .row.buttons { gap: 8px; }
+.screener-form button {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(255,255,255,0.05); color: var(--text);
+  cursor: pointer; font-size: 13px;
+}
+.screener-form button.primary { background: #1565c0; border-color: #1565c0; color: #fff; }
+.screener-form button.danger  { color: #ef5350; border-color: #ef5350; }
+.screener-form button:disabled { opacity: 0.6; cursor: not-allowed; }
+.screener-adhoc { margin-top: 18px; border-top: 1px dashed var(--border); padding-top: 10px; }
+.screener-adhoc summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+.screener-list { display: flex; flex-direction: column; gap: 10px; }
+.screener-list.compact { gap: 4px; }
+.screener-card {
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; background: rgba(255,255,255,0.015);
+}
+.screener-card.off { opacity: 0.55; }
+.screener-card.match { border-color: #1565c0; }
+.screener-card header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.screener-card h3 { margin: 0; font-size: 14px; }
+.screener-card .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 11px; }
+.screener-card .badge {
+  padding: 1px 6px; border-radius: 4px; font-size: 11px;
+  background: rgba(255,255,255,0.08); color: var(--text);
+}
+.screener-card .badge.scope { background: rgba(66,165,245,0.18); color: #42a5f5; }
+.screener-card .badge.on    { background: rgba(76,175,80,0.18); color: #66bb6a; }
+.screener-card .badge.off   { background: rgba(158,158,158,0.18); color: var(--muted); }
+.screener-card .prompt-body, .prompt-body {
+  margin: 8px 0; padding: 8px 10px;
+  background: rgba(0,0,0,0.25); border-radius: 6px;
+  font-size: 12px; white-space: pre-wrap;
+  border: 1px solid var(--border);
+}
+.screener-card .reason { margin: 6px 0; font-size: 13px; }
+.screener-card .reason.muted { color: var(--muted); font-size: 12px; }
+.screener-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.screener-actions button {
+  padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: rgba(255,255,255,0.05); color: var(--text);
+  cursor: pointer; font-size: 12px;
+}
+.screener-actions button.primary { background: #1565c0; border-color: #1565c0; color: #fff; }
+.screener-actions button.danger  { color: #ef5350; border-color: #ef5350; }
+
 .tf-block .charts {
   display: flex; flex-direction: column; gap: 12px;
   width: 100%; margin-bottom: 12px;
