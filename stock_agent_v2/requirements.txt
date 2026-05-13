@@ -4,6 +4,7 @@ google-genai>=1.0.0        # Gemini API (analyzer.py _call_gemini)
 
 # ── HTTP / 데이터 ───────────────────────────────────────────────
 requests>=2.31.0           # KIS / DART / SEC EDGAR / Telegram
+httpx>=0.27.0              # /intel/* proxy → my_palantir (web/routes/intel_proxy.py)
 pandas>=2.0.0              # 캔들·지표·DB 조회
 numpy>=1.24.0              # 지표 계산·시그널
 yfinance>=0.2.40           # market_warning 시세 (SPY/QQQ/VIX/...)
