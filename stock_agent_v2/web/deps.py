@@ -1,7 +1,7 @@
 """FastAPI 의존성: 로그인 가드 / 현재 사용자 조회."""
 from __future__ import annotations
 
-from fastapi import Cookie, Request
+from fastapi import Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from database import load_user
@@ -30,6 +30,21 @@ def require_user(request: Request):
     실제 라우트에선 `user = require_user_or_redirect(request)` 의 분기를 사용.
     """
     raise NotImplementedError("use require_user_or_redirect() inside a route")
+
+
+def require_user_or_401(request: Request):
+    """API용 — 인증 없으면 RedirectResponse 대신 401 JSON 반환.
+    /api/* 엔드포인트가 JSON 클라이언트(my_palantir httpx 등) 에서 호출되므로
+    HTML 로그인 페이지로의 303 리다이렉트는 부적절.
+    """
+    cookie = request.cookies.get(COOKIE_NAME)
+    if cookie:
+        username = parse_session_cookie(cookie)
+        if username:
+            user = load_user(username)
+            if user:
+                return user
+    raise HTTPException(status_code=401, detail="login required")
 
 
 def require_user_or_redirect(request: Request):
