@@ -391,6 +391,113 @@ def compute_pullback_signal(df: pd.DataFrame, cfg: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 3-B. 현재 눌림목 진행 상태 감지 (compute_pullback_state)
+# ═══════════════════════════════════════════════════════════════════════
+
+def compute_pullback_state(df: pd.DataFrame, cfg: dict) -> dict:
+    """현재가가 '눌림목' (pullback) 상태인지 5개 조건 평가.
+
+    compute_pullback_signal (MA5 위 확장 → 풀백 대기) 과 다른 개념.
+    이 쪽은 이미 풀백이 진행되어 지지선 근처까지 내려온 상태를 감지.
+
+    조건:
+      1) 상승 추세 (MA5 > MA20)
+      2) 최근 20봉 고점이 D-3 ~ D-15 사이
+      3) 현재가가 고점 대비 -2% ~ -10% 하락
+      4) 지지선 근처 (MA10 ±2.5% 또는 MA20 ±4%)
+      5) RSI 가 고점 시점 대비 5pt 이상 식음
+
+    5/5 → ENTRY_CANDIDATE (🟢 진입 후보)
+    3/5 이상 + 상승추세 → IN_PROGRESS (🟡 눌림목 진행 중)
+    그 외 → NONE
+    """
+    if len(df) < 30:
+        return {"status": "NONE", "message": "데이터 부족"}
+
+    c, h, l = df["close"], df["high"], df["low"]
+    ma5  = c.rolling(5).mean().iloc[-1]
+    ma10 = c.rolling(10).mean().iloc[-1]
+    ma20 = c.rolling(20).mean().iloc[-1]
+    if pd.isna(ma5) or pd.isna(ma20):
+        return {"status": "NONE", "message": "이동평균 계산 불가"}
+
+    uptrend = bool(ma5 > ma20)
+
+    window = min(20, len(c))
+    recent = c.iloc[-window:]
+    high_idx_pos = int(recent.values.argmax())
+    days_since_high = window - 1 - high_idx_pos
+    recent_high = float(recent.max())
+    current = float(c.iloc[-1])
+    drawdown_pct = (current - recent_high) / recent_high * 100 if recent_high else 0.0
+
+    near_ma10 = abs(current - ma10) / current * 100 < 2.5 if not pd.isna(ma10) else False
+    near_ma20 = abs(current - ma20) / current * 100 < 4.0
+    near_support = bool(near_ma10 or near_ma20)
+
+    rp = cfg.get("rsi_period", 14)
+    delta = c.diff()
+    gain = delta.clip(lower=0).rolling(rp).mean()
+    loss = (-delta.clip(upper=0)).rolling(rp).mean()
+    rsi  = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+    rsi_now = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else None
+    rsi_at_high = None
+    try:
+        # 고점 시점의 rsi (해당 봉 위치)
+        rsi_at_high_val = rsi.iloc[-window:].iloc[high_idx_pos]
+        if not pd.isna(rsi_at_high_val):
+            rsi_at_high = float(rsi_at_high_val)
+    except Exception:
+        pass
+    rsi_cooled = bool(rsi_now is not None and rsi_at_high is not None
+                       and rsi_now < rsi_at_high - 5)
+
+    conds = {
+        "uptrend":       uptrend,
+        "days_in_range": 3 <= days_since_high <= 15,
+        "drawdown_ok":   -10 <= drawdown_pct <= -2,
+        "near_support":  near_support,
+        "rsi_cooled":    rsi_cooled,
+    }
+    n_passed = sum(conds.values())
+
+    base = {
+        "uptrend":         uptrend,
+        "drawdown_pct":    drawdown_pct,
+        "days_since_high": days_since_high,
+        "recent_high":     recent_high,
+        "rsi_now":         rsi_now,
+        "rsi_at_high":     rsi_at_high,
+        "near_ma10":       near_ma10,
+        "near_ma20":       near_ma20,
+        "conds":           conds,
+        "n_passed":        n_passed,
+    }
+
+    if n_passed == 5:
+        support_txt = "MA10" if near_ma10 else "MA20"
+        return {**base,
+            "status":  "ENTRY_CANDIDATE",
+            "message": f"🟢 눌림목 진입 후보 — 고점 {drawdown_pct:+.1f}% "
+                        f"(D-{days_since_high}) · {support_txt} 근처 · "
+                        f"RSI {rsi_at_high:.0f} → {rsi_now:.0f}",
+        }
+    if n_passed >= 3 and uptrend:
+        return {**base,
+            "status":  "IN_PROGRESS",
+            "message": f"🟡 눌림목 진행 중 ({n_passed}/5) — "
+                        f"고점 {drawdown_pct:+.1f}% (D-{days_since_high})",
+        }
+    return {**base,
+        "status":  "NONE",
+        "message": (f"눌림목 아님 (상승추세 {'O' if uptrend else 'X'}, "
+                    f"고점 {drawdown_pct:+.1f}%, "
+                    f"D-{days_since_high}, "
+                    f"지지선 {'근접' if near_support else '이격'})"),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 4. 포맷 헬퍼
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -626,8 +733,10 @@ class StockAnalyzer:
         ichi_w = compute_ichimoku(weekly,  _ichi_cfg(9, 13, 26, 13))
         ichi_m = compute_ichimoku(monthly, _ichi_cfg(5,  8, 13,  8))
 
-        # 5일선 풀백 시그널 (Round 4 backtest 검증)
+        # 5일선 풀백 시그널 (Round 4 backtest 검증) — MA5 위 확장 감지
         pullback = compute_pullback_signal(daily, cfg)
+        # 현재 눌림목 진행 상태 — 지지선 근처 도달 / 진입 후보 감지
+        pullback_state = compute_pullback_state(daily, cfg)
 
         # 엘리엇 5파 추진파 검출 (일봉 PoC)
         elliott = compute_elliott_wave(daily, config.ELLIOTT_CONFIG)
@@ -664,7 +773,7 @@ class StockAnalyzer:
             d_ind, w_ind, m_ind,
             d_pat, w_pat, m_pat,
             ichi, ichi_w, ichi_m,
-            pullback, elliott, disc_text, disc_label, report,
+            pullback, pullback_state, elliott, disc_text, disc_label, report,
         )
 
         text, provider = self._call_ai(prompt)
@@ -674,7 +783,7 @@ class StockAnalyzer:
         self, ticker, name, qty, curr, currency, overseas,
         d, w, m, d_pat, w_pat, m_pat,
         ichi, ichi_w, ichi_m,
-        pullback, elliott, disc, disc_label, report
+        pullback, pullback_state, elliott, disc, disc_label, report
     ) -> str:
 
         fp = lambda v: _fp(v, overseas)
@@ -696,6 +805,20 @@ class StockAnalyzer:
                 f"영업이익 {_f(report.get('op_income'),1)}억  "
                 f"순이익 {_f(report.get('net_income'),1)}억  "
                 f"부채비율 {_f(report.get('debt_ratio'),1)}%"
+            )
+
+        # 현재 눌림목 진행 상태 — 진입 후보·진행 중일 때 세부 조건 노출
+        pullback_state_detail = ""
+        if pullback_state.get("status") in ("ENTRY_CANDIDATE", "IN_PROGRESS"):
+            cd = pullback_state["conds"]
+            chk = lambda b: "✓" if b else "✗"
+            pullback_state_detail = (
+                f"\n조건: "
+                f"상승추세{chk(cd['uptrend'])} · "
+                f"고점D-3~15{chk(cd['days_in_range'])} · "
+                f"낙폭-2~10%{chk(cd['drawdown_ok'])} · "
+                f"지지선근접{chk(cd['near_support'])} · "
+                f"RSI식음{chk(cd['rsi_cooled'])}"
             )
 
         # 풀백 시그널 텍스트 (Round 4 backtest 검증된 매매 룰)
@@ -819,8 +942,11 @@ RSI: {m.get('rsi_signal','N/A')}
 ═══ 일목균형표 — 월봉 (5/8/13, shift 8) ═══
 {ichi_txt_m}
 
-═══ 5일선 풀백 시그널 (검증된 매매 룰) ═══
+═══ 5일선 풀백 시그널 (MA5 위 확장 감지, 검증된 매매 룰) ═══
 {pullback_txt}
+
+═══ 현재 눌림목 진행 상태 (지지선 근처 도달 여부) ═══
+{pullback_state['message']}{pullback_state_detail}
 
 ═══ 엘리엇 파동 (일봉, 추진 5파 검출 PoC) ═══
 {elliott_txt}
@@ -874,7 +1000,7 @@ RSI: {m.get('rsi_signal','N/A')}
 · 패턴: {{일봉 추세전환 신호}}
 · MACD: {{크로스 여부}}
 
-🎯 5일선 풀백 시그널
+🎯 5일선 풀백 시그널 (MA5 위 확장)
 · {{시그널 발생 시: 강도(🔥STRONG≥4.0 / 📈MODERATE≥3.0 / 👁️WATCH≥2.0) + 현재 gap_atr 값.
    예: "🔥 STRONG — gap +4.21 ATR (검증된 sweet spot)" /
        "📈 MODERATE — gap +3.15 ATR (보조)" /
@@ -884,6 +1010,12 @@ RSI: {m.get('rsi_signal','N/A')}
 · {{시그널 없으면: "현재 gap X.XX ATR (시그널 없음)" 한 줄로만.
    강도별 매매 가중: STRONG → 🎯 전략 적극 반영,  MODERATE → 보조 참고,
    WATCH → 관찰만 (단독 진입 근거 안 됨)}}
+
+🔻 현재 눌림목 상태 (지지선 근처 도달 여부)
+· {{status 가 ENTRY_CANDIDATE 면: "🟢 진입 후보 — 고점 -X.X% (D-N), MA10/MA20 근처, RSI 식음" 한 줄}}
+· {{status 가 IN_PROGRESS 면: "🟡 진행 중 (N/5 조건) — 고점 -X.X% (D-N)" 한 줄 + 부족한 조건 명시}}
+· {{status 가 NONE 이면: "눌림목 아님 — <간단한 사유>" 한 줄. 예: "추세 약함" / "고점 너무 가까움" / "지지선에서 이격"}}
+· {{전략 의미: ENTRY_CANDIDATE → 분할 매수 추천. IN_PROGRESS → 관찰. NONE → 풀백 전략 부적합}}
 
 🌊 엘리엇 파동(일봉)
 · {{검출됐으면: "방향 + 상태 (등급 X, 신뢰도 XX/100)" 한 줄.
