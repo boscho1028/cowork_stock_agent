@@ -82,6 +82,8 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # 모든 페이지에 username 노출 (로그인 페이지 제외)
+    # HTML 응답에는 Cache-Control: no-store 강제 — 브라우저·ngrok 휴리스틱
+    # 캐싱이 stale UI (별표 토글 후에도 옛 상태) 보이는 문제 차단.
     @app.middleware("http")
     async def attach_user(request: Request, call_next):
         username = None
@@ -89,7 +91,12 @@ def create_app() -> FastAPI:
         if cookie:
             username = parse_session_cookie(cookie)
         request.state.username = username
-        return await call_next(request)
+        response = await call_next(request)
+        # /static 경로는 mtime 캐시버스트 따로 — 그 외 동적 응답만 no-store
+        path = request.url.path
+        if not path.startswith("/static/") and not path.startswith("/charts/"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
 
     # ── 로그인 / 로그아웃 ───────────────────────────────────────
     @app.get("/login")

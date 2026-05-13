@@ -250,6 +250,56 @@ def _refresh_persist_charts(analysis_id: int, ticker: str, charts: dict) -> None
         save_chart_files(analysis_id, saved)
 
 
+@router.post("/reports/analyze/{ticker}")
+def reports_analyze_new(ticker: str, request: Request):
+    """신규 분석 트리거 — universe 종목 처음 분석할 때.
+    1) KIS 캔들 update (최신 종가 반영)
+    2) AI 분석 → DB 저장
+    3) 차트 생성 → 디스크 저장
+    4) 새 analysis_id 의 detail 페이지로 redirect (30~60초 소요)
+    """
+    u = require_user_or_redirect(request)
+    if isinstance(u, RedirectResponse):
+        return u
+    import re as _re
+    if not _re.match(r'^[A-Za-z0-9.\-]{1,16}$', ticker):
+        return RedirectResponse(url="/reports", status_code=303)
+    ticker = ticker.upper()
+    info = (config.get_portfolio_detail().get(ticker)
+         or config.get_universe_detail().get(ticker))
+    if not info:
+        return RedirectResponse(url="/reports", status_code=303)
+    name = info.get("name", ticker)
+
+    # 1) KIS 캔들 update — 현재 종가 반영
+    try:
+        from kis_collector import KISCollector
+        kis = KISCollector()
+        if kis.login():
+            kis.run_daily_update([ticker])
+    except Exception as e:
+        print(f"[analyze-new] {ticker} KIS update 실패: {e}")
+
+    # 2) AI 분석 + 차트
+    new_id = None
+    try:
+        from analyzer import StockAnalyzer
+        from database import save_analysis
+        text = StockAnalyzer().analyze(ticker)
+        new_id = save_analysis(ticker, text)
+        charts = _refresh_make_charts(ticker, name)
+        _refresh_persist_charts(new_id, ticker, charts)
+        print(f"[analyze-new] {ticker} 완료 → analysis_id={new_id}, 차트 {len(charts)}장")
+    except Exception as e:
+        import traceback
+        print(f"[analyze-new] {ticker} AI 분석 실패: {e}")
+        traceback.print_exc()
+
+    if new_id:
+        return RedirectResponse(url=f"/reports/{new_id}", status_code=303)
+    return RedirectResponse(url="/reports", status_code=303)
+
+
 @router.post("/reports/{analysis_id}/refresh")
 def reports_refresh(analysis_id: int, request: Request):
     """수동 갱신 — KIS 캔들 update + AI 재분석 + 차트 재생성 + 캐시 무효화.

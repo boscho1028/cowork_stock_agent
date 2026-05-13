@@ -55,6 +55,12 @@
           {% endif %}
         </div>
     {% if c.latest_id %}</a>{% else %}</div>{% endif %}
+    <form action="/reports/analyze/{{ c.ticker }}" method="post"
+          class="analyze-now-form no-print"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳';">
+      <button type="submit"
+              title="현재 종가 기준 {% if c.latest_id %}재{% endif %}분석 (30~60초)">▶</button>
+    </form>
     <button type="button" class="remove-btn" data-ticker="{{ c.ticker }}"
             title="universe 에서 제거">×</button>
   </div>

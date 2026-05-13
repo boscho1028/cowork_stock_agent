@@ -73,29 +73,50 @@
   }
 
   // ── 별표 토글 (포트폴리오 편입/제외) ────────────────────
-  document.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.star-btn');
+  // 윈도우-레벨 capture phase 에 등록 — 일부 지갑 확장(SES/MetaMask 등)이
+  // document 레벨에서 stopPropagation 으로 클릭을 가로채는 케이스에서도
+  // 우리 핸들러가 가장 먼저 실행되게.
+  function _applyStar(btn, active) {
+    btn.classList.toggle('active', active);
+    btn.textContent = active ? '⭐' : '☆';
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    btn.title = active ? '포트폴리오에서 제외' : '포트폴리오에 편입';
+  }
+
+  async function _handleStarClick(e) {
+    const btn = e.target && e.target.closest && e.target.closest('.star-btn');
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    const ticker = btn.dataset.ticker;
+    if (typeof e.stopImmediatePropagation === 'function') {
+      e.stopImmediatePropagation();
+    }
+    if (btn.dataset.busy === '1') return;
+    btn.dataset.busy = '1';
     btn.disabled = true;
+    const wasActive = btn.classList.contains('active');
+    _applyStar(btn, !wasActive);    // optimistic — 즉시 반영
+    const ticker = btn.dataset.ticker;
     try {
       const r = await fetch(`/api/portfolio/${encodeURIComponent(ticker)}/toggle`, {
         method: 'POST',
       });
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json();
-      btn.classList.toggle('active', data.in_portfolio);
-      btn.textContent = data.in_portfolio ? '⭐' : '☆';
-      btn.setAttribute('aria-pressed', data.in_portfolio ? 'true' : 'false');
-      btn.title = data.in_portfolio ? '포트폴리오에서 제외' : '포트폴리오에 편입';
+      _applyStar(btn, data.in_portfolio);
     } catch (err) {
+      _applyStar(btn, wasActive);
       alert('별표 토글 실패: ' + err.message);
     } finally {
       btn.disabled = false;
+      setTimeout(() => { btn.dataset.busy = '0'; }, 300);
     }
-  });
+  }
+  // capture: true — 모든 다른 click 핸들러(확장 포함)보다 먼저 실행
+  window.addEventListener('click', _handleStarClick, { capture: true });
+
+  // 새 카드 추가 시 사용 (현재는 노옵 — window-level capture 가 자동 처리)
+  window._bindStarButton = function () { /* no-op */ };
 
   // ── X 제거 (universe 에서 삭제) ─────────────────────────
   document.addEventListener('click', async (e) => {
@@ -167,6 +188,9 @@
           const grid = block.querySelector('.ticker-grid');
           const card = buildCard(data);
           grid.insertBefore(card, grid.firstChild);
+          // 새 카드의 별표 버튼에도 핸들러 바인딩
+          const newStar = card.querySelector('.star-btn');
+          if (newStar) bindStarButton(newStar);
         }
         recountBlocks();
         update();

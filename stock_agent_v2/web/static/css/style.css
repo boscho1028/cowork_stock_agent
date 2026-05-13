@@ -150,12 +150,14 @@ a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums;
 }
 
-/* 별표 버튼 — 좌측 상단. active 면 노란 ⭐, 아니면 흐린 ☆ */
+/* 별표 버튼 — 좌측 상단. active 면 노란 ⭐, 아니면 흐린 ☆.
+   z-index: card-link 위에 확실히 올라가도록 명시. */
 .ticker-card .star-btn {
   position: absolute; left: 4px; top: 5px;
   background: transparent; border: none; padding: 2px 4px;
   font-size: 14px; line-height: 1; cursor: pointer;
   color: var(--muted); opacity: 0.5;
+  z-index: 5;
   transition: opacity .12s, transform .12s;
 }
 .ticker-card .star-btn:hover { opacity: 1; transform: scale(1.15); }
@@ -172,6 +174,30 @@ a:hover { text-decoration: underline; }
 }
 .ticker-card:hover .remove-btn { opacity: 0.75; }
 .ticker-card .remove-btn:hover { color: var(--red); opacity: 1; }
+
+/* 모든 카드 우하단의 작은 "▶ 분석" 버튼 — × 버튼과 대칭 위치 */
+.ticker-card .analyze-now-form {
+  position: absolute; right: 4px; bottom: 4px;
+  margin: 0; padding: 0;
+}
+.ticker-card .analyze-now-form button {
+  padding: 1px 6px; min-width: 0;
+  background: transparent;
+  color: #42a5f5;
+  border: 1px solid rgba(66,165,245,0.35); border-radius: 4px;
+  font-size: 10px; line-height: 1.2; cursor: pointer; font: inherit;
+  opacity: 0.45;
+  transition: opacity .12s, background .12s, border-color .12s;
+}
+.ticker-card:hover .analyze-now-form button { opacity: 0.85; }
+.ticker-card .analyze-now-form button:hover {
+  opacity: 1;
+  background: rgba(66,165,245,0.15); border-color: rgba(66,165,245,0.7);
+}
+.ticker-card .analyze-now-form button:disabled {
+  opacity: 1; cursor: not-allowed;
+  background: rgba(66,165,245,0.1);
+}
 
 /* 종목 추가 버튼 / 폼 */
 .tabs .tab-add { padding: 7px 10px; font-weight: 700; }

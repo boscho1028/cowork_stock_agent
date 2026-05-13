@@ -24,6 +24,7 @@
       {{ nav_link('/macro',    '매크로') }}
       {{ nav_link('/warnings', '경고') }}
       {{ nav_link('/filings',  '공시') }}
+      {{ nav_link('/intel/positions', '🧠 인텔리전스') }}
     </nav>
     <div class="topbar-actions">
       <button type="button" class="topbar-print no-print" onclick="window.print();"
@@ -38,6 +39,14 @@
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+  // bfcache (뒤로가기/앞으로가기 캐시) 복원 시 강제 새로고침 — 별표 등
+  // 상태가 stale 한 채로 보이는 문제 차단.
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) window.location.reload();
+  });
+  </script>
 
   {# 차트 확대 modal — 차트 이미지 클릭 시 풀화면 오버레이 표시 #}
   <div id="img-modal" class="img-modal no-print" hidden>
