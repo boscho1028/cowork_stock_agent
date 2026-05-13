@@ -333,7 +333,7 @@ def create_app() -> FastAPI:
     # ── 컨텐츠 라우트 ────────────────────────────────────────────
     from web.routes import (
         reports, signals, warnings, filings, universe,
-        supply, etf, screener, market, macro, intel_proxy,
+        supply, etf, screener, market, macro, intel_proxy, api,
     )
     app.include_router(reports.router)
     app.include_router(signals.router)
@@ -346,6 +346,7 @@ def create_app() -> FastAPI:
     app.include_router(market.router)
     app.include_router(macro.router)
     app.include_router(intel_proxy.router)
+    app.include_router(api.router)
 
     @app.get("/")
     def root(request: Request):
